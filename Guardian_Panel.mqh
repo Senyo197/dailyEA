@@ -7,8 +7,8 @@
 #include "Guardian_History.mqh"
 #include "Guardian_Statistics.mqh"
 #include "Guardian_Lock.mqh"
+#include "Guardian_Time.mqh"
 #include "Guardian_Orders.mqh"
-#include "Guardian_Panel.mqh"
 
 //==================================================
 // PANEL
@@ -82,6 +82,24 @@ void GuardianUpdatePanel(
    double floatingProfit =
       GuardianFloatingProfit();
 
+   //==================================================
+   // CURRENT GMT+0 TIME
+   //==================================================
+
+   datetime currentGMT =
+      GuardianGMTNow();
+
+   string currentGMTText =
+      TimeToString(
+         currentGMT,
+         TIME_DATE |
+         TIME_SECONDS
+      );
+
+   //==================================================
+   // STATUS
+   //==================================================
+
    string dailyStatus =
       "ACTIVE";
 
@@ -106,6 +124,10 @@ void GuardianUpdatePanel(
    if(TradingLockActive)
       guardianStatus = "LOCKED";
 
+   //==================================================
+   // PROFIT TEXT
+   //==================================================
+
    string dailyProfitText =
       DoubleToString(
          dailyProfit,
@@ -124,9 +146,19 @@ void GuardianUpdatePanel(
          2
       );
 
+   //==================================================
+   // PANEL
+   //==================================================
+
    string text =
       "MANUAL TRADING GUARDIAN v4.10\n"
       "================================\n"
+
+      "GMT+0 TIME:            " +
+      currentGMTText +
+      "\n"
+
+      "--------------------------------\n"
 
       "DAILY\n"
       "Executed Trades:       " +
