@@ -221,7 +221,7 @@ bool GuardianIsInsideWeeklyTradingPeriod(
    if(t.day_of_week == 5)
    {
       int fridayEnd =
-         (9 * 60) + 30;
+         (16 * 60) + 30;
 
       return minutes <= fridayEnd;
    }

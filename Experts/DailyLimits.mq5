@@ -1,11 +1,12 @@
 #property strict
-#property version "4.12"
+#property version "4.14"
 
 #include <Trade/Trade.mqh>
 
 #include <ManualTradingGuardian/Guardian_Time.mqh>
 #include <ManualTradingGuardian/Guardian_TradingWindows.mqh>
 #include <ManualTradingGuardian/Guardian_History.mqh>
+#include <ManualTradingGuardian/Guardian_EntryLimits.mqh>
 #include <ManualTradingGuardian/Guardian_Statistics.mqh>
 #include <ManualTradingGuardian/Guardian_Lock.mqh>
 #include <ManualTradingGuardian/Guardian_Orders.mqh>
@@ -202,7 +203,32 @@ void GuardianCheckManualEntry(
          newsRelease
       );
 
-   if(!GuardianEntryTimeAllowed(tradeTime))
+   bool entryTimeAllowed =
+      GuardianEntryTimeAllowed(
+         tradeTime
+      );
+
+   bool entryLimitReached = false;
+
+   if(entryTimeAllowed)
+   {
+      string symbol =
+         HistoryDealGetString(
+            dealTicket,
+            DEAL_SYMBOL
+         );
+
+      entryLimitReached =
+         GuardianPairLossLimitReached(
+            symbol,
+            tradeTime
+         );
+   }
+
+   if(
+      !entryTimeAllowed ||
+      entryLimitReached
+   )
    {
       ulong positionID =
          (ulong)
