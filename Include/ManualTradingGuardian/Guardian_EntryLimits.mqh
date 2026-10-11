@@ -10,6 +10,11 @@ input bool EnforcePairLossLimitPerEntryWindow = true;
 input int MaxActualStopLossesPerPairPerEntryWindow = 1;
 input int MaxNegativeManualClosesPerPairPerEntryWindow = 2;
 
+// Window 3 permits one manual entry per symbol before the split and
+// one from the split onward. Entries exactly at the split use period two.
+input int Window3TradeSplitHour = 13;
+input int Window3TradeSplitMinute = 50;
+
 bool GuardianBuildEntryWindowBounds(
    datetime when,
    int startHour,
@@ -149,6 +154,157 @@ bool GuardianGetEntryWindowBounds(
          windowStart,
          windowEnd
       );
+   }
+
+   return false;
+}
+
+bool GuardianGetWindow3TradeSegmentBounds(
+   datetime entryTime,
+   datetime &segmentStart,
+   datetime &segmentEnd
+)
+{
+   int currentMinutes =
+      GuardianMinutesOfDay(entryTime);
+
+   if(!GuardianTimeInsideWindow(
+         currentMinutes,
+         Window3StartHour,
+         Window3StartMinute,
+         Window3EndHour,
+         Window3EndMinute
+      ))
+   {
+      return false;
+   }
+
+   int window3StartMinutes =
+      (Window3StartHour * 60) +
+      Window3StartMinute;
+
+   int window3EndMinutes =
+      (Window3EndHour * 60) +
+      Window3EndMinute;
+
+   int splitMinutes =
+      (Window3TradeSplitHour * 60) +
+      Window3TradeSplitMinute;
+
+   if(
+      splitMinutes <= window3StartMinutes ||
+      splitMinutes > window3EndMinutes
+   )
+   {
+      return false;
+   }
+
+   datetime windowStart = 0;
+   datetime windowEnd = 0;
+
+   GuardianBuildEntryWindowBounds(
+      entryTime,
+      Window3StartHour,
+      Window3StartMinute,
+      Window3EndHour,
+      Window3EndMinute,
+      windowStart,
+      windowEnd
+   );
+
+   MqlDateTime splitTime;
+
+   TimeToStruct(entryTime, splitTime);
+
+   splitTime.hour = Window3TradeSplitHour;
+   splitTime.min = Window3TradeSplitMinute;
+   splitTime.sec = 0;
+
+   datetime splitAt = StructToTime(splitTime);
+
+   if(entryTime < splitAt)
+   {
+      segmentStart = windowStart;
+      segmentEnd = splitAt - 1;
+   }
+   else
+   {
+      segmentStart = splitAt;
+      segmentEnd = windowEnd;
+   }
+
+   return true;
+}
+
+bool GuardianWindow3TradeLimitExceeded(
+   string symbol,
+   datetime entryTime
+)
+{
+   datetime segmentStart = 0;
+   datetime segmentEnd = 0;
+
+   if(!GuardianGetWindow3TradeSegmentBounds(
+         entryTime,
+         segmentStart,
+         segmentEnd
+      ))
+   {
+      return false;
+   }
+
+   ResetLastError();
+
+   if(!HistorySelect(segmentStart, entryTime))
+   {
+      Print(
+         "GUARDIAN: CANNOT VERIFY WINDOW 3 TRADE LIMIT | Error=",
+         GetLastError()
+      );
+
+      return false;
+   }
+
+   int manualEntries = 0;
+   int totalDeals = HistoryDealsTotal();
+
+   for(int i = 0;
+       i < totalDeals;
+       i++)
+   {
+      ulong dealTicket = HistoryDealGetTicket(i);
+
+      if(dealTicket == 0)
+         continue;
+
+      long entry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+
+      if(entry != DEAL_ENTRY_IN && entry != DEAL_ENTRY_INOUT)
+         continue;
+
+      if(HistoryDealGetString(dealTicket, DEAL_SYMBOL) != symbol)
+         continue;
+
+      long reason = HistoryDealGetInteger(dealTicket, DEAL_REASON);
+
+      if(!GuardianIsManualDealReason(reason))
+         continue;
+
+      manualEntries++;
+
+      if(manualEntries > 1)
+      {
+         Print(
+            "GUARDIAN: WINDOW 3 TRADE LIMIT REACHED | Symbol=",
+            symbol,
+            " | Segment=",
+            TimeToString(segmentStart, TIME_DATE | TIME_MINUTES),
+            " - ",
+            TimeToString(segmentEnd, TIME_MINUTES)
+         );
+
+         return true;
+      }
    }
 
    return false;

@@ -50,19 +50,6 @@ int GuardianServerGMTOffsetSeconds()
 }
 
 //==================================================
-// CONVERT BROKER/SERVER TIME -> GMT+0
-//==================================================
-
-datetime GuardianServerToGMT(
-   datetime serverTime
-)
-{
-   return
-      serverTime -
-      GuardianServerGMTOffsetSeconds();
-}
-
-//==================================================
 // CONVERT GMT+0 -> BROKER/SERVER TIME
 //
 // Needed when passing a GMT boundary to

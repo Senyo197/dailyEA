@@ -42,10 +42,22 @@ input int Window5EndMinute   = 30;
 input bool BlockHighImpactNewsEntries = true;
 input int  HighImpactNewsDelayMinutes = 10;
 
+// No new manual entries on the release day for these USD events.
+input bool BlockFOMCCPINFPReleaseDays = true;
+
+// FOMC Minutes permit Windows 1-2, then block the rest of the day.
+input bool BlockFOMCMinutesAfterWindow2 = true;
+
+// US bank holidays block new manual entries for the full calendar day.
+input bool BlockUSBankHolidays = true;
+
 // Window 3 can use a longer delay before the New York session begins.
 input int NewYorkSessionStartHour = 13;
 input int NewYorkSessionStartMinute = 30;
 input int HighImpactNewsDelayBeforeNewYorkMinutes = 20;
+
+// Each marker is matched anywhere in the broker symbol name.
+input string USIndexSymbolMarkers = "NAS,NASDAQ,USTEC,US100,NDX,NQ100,TECH100,US500,SPX500,SPX,US30,DJ30,DOW,US2000,RUSSELL,RTY";
 
 const int GuardianNewsCacheRefreshSeconds = 300;
 
@@ -85,7 +97,8 @@ bool GuardianTimeInsideWindow(
 //==================================================
 
 bool GuardianIsInsideEntryWindow(
-   datetime when
+   datetime when,
+   string symbol = ""
 )
 {
    int currentMinutes =
@@ -133,7 +146,7 @@ bool GuardianIsInsideEntryWindow(
          Window3EndMinute
       ))
    {
-      return true;
+      return GuardianIsUSIndexSymbol(symbol);
    }
 
    // ---------------------------------------------
@@ -169,6 +182,50 @@ bool GuardianIsInsideEntryWindow(
    return false;
 }
 
+bool GuardianIsUSIndexSymbol(
+   string symbol
+)
+{
+   string symbolName = symbol;
+
+   StringToUpper(symbolName);
+
+   string markers[];
+   ushort separator =
+      StringGetCharacter(
+         ",",
+         0
+      );
+
+   int total =
+      StringSplit(
+         USIndexSymbolMarkers,
+         separator,
+         markers
+      );
+
+   for(int i = 0;
+       i < total;
+       i++)
+   {
+      string marker = markers[i];
+
+      StringTrimLeft(marker);
+      StringTrimRight(marker);
+      StringToUpper(marker);
+
+      if(
+         StringLen(marker) > 0 &&
+         StringFind(symbolName, marker) >= 0
+      )
+      {
+         return true;
+      }
+   }
+
+   return false;
+}
+
 //==================================================
 // WEEKLY ENTRY PERIOD
 //
@@ -178,7 +235,8 @@ bool GuardianIsInsideEntryWindow(
 //==================================================
 
 bool GuardianIsInsideWeeklyTradingPeriod(
-   datetime when
+   datetime when,
+   string symbol = ""
 )
 {
    MqlDateTime t;
@@ -199,6 +257,15 @@ bool GuardianIsInsideWeeklyTradingPeriod(
    // Monday
    if(t.day_of_week == 1)
    {
+      if(GuardianIsUSIndexSymbol(symbol))
+      {
+         int usIndexMondayStart =
+            (Window3StartHour * 60) +
+            Window3StartMinute;
+
+         return minutes >= usIndexMondayStart;
+      }
+
       int mondayStart =
          (15 * 60) + 50;
 
@@ -220,6 +287,15 @@ bool GuardianIsInsideWeeklyTradingPeriod(
    // Friday
    if(t.day_of_week == 5)
    {
+      if(GuardianIsUSIndexSymbol(symbol))
+      {
+         int usIndexFridayEnd =
+            (Window3EndHour * 60) +
+            Window3EndMinute;
+
+         return minutes <= usIndexFridayEnd;
+      }
+
       int fridayEnd =
          (16 * 60) + 30;
 
@@ -254,6 +330,334 @@ datetime GuardianCalendarDayStart(
    t.sec  = 0;
 
    return StructToTime(t);
+}
+
+int GuardianLoadUSCalendarDayValues(
+   datetime dayStart,
+   bool limitToUSDCurrency,
+   string checkName,
+   MqlCalendarValue &values[]
+)
+{
+   ResetLastError();
+
+   int valueCount;
+
+   if(limitToUSDCurrency)
+      valueCount =
+         CalendarValueHistory(
+            values,
+            dayStart,
+            dayStart + 86400,
+            "US",
+            "USD"
+         );
+   else
+      valueCount =
+         CalendarValueHistory(
+            values,
+            dayStart,
+            dayStart + 86400,
+            "US"
+         );
+
+   if(valueCount >= 0)
+      return valueCount;
+
+   Print(
+      "GUARDIAN: CANNOT CHECK ",
+      checkName,
+      " | Error=",
+      GetLastError()
+   );
+
+   return -1;
+}
+
+bool GuardianIsCPIOrNFPEvent(
+   MqlCalendarEvent &event
+)
+{
+   string eventName = event.name;
+
+   StringToUpper(eventName);
+
+   return (
+      StringFind(eventName, "CPI") >= 0 ||
+      StringFind(eventName, "NONFARM") >= 0 ||
+      StringFind(eventName, "NFP") >= 0
+   );
+}
+
+bool GuardianIsFullDayBlackoutEvent(
+   MqlCalendarEvent &event
+)
+{
+   string eventName = event.name;
+
+   StringToUpper(eventName);
+
+   return (
+      StringFind(eventName, "INTEREST RATE DECISION") >= 0 ||
+      StringFind(eventName, "RATE DECISION") >= 0 ||
+      GuardianIsCPIOrNFPEvent(event)
+   );
+}
+
+bool GuardianIsNonFridayWindow5(
+   datetime when
+)
+{
+   MqlDateTime dateTime;
+
+   TimeToStruct(when, dateTime);
+
+   if(dateTime.day_of_week == 5)
+      return false;
+
+   return GuardianTimeInsideWindow(
+      GuardianMinutesOfDay(when),
+      Window5StartHour,
+      Window5StartMinute,
+      Window5EndHour,
+      Window5EndMinute
+   );
+}
+
+bool GuardianIsFOMCMinutesEvent(
+   MqlCalendarEvent &event
+)
+{
+   string eventName = event.name;
+
+   StringToUpper(eventName);
+
+   return (
+      StringFind(eventName, "FOMC") >= 0 &&
+      StringFind(eventName, "MINUTES") >= 0
+   );
+}
+
+bool GuardianFullDayNewsBlackoutActive(
+   datetime when
+)
+{
+   if(!BlockFOMCCPINFPReleaseDays)
+      return false;
+
+   static datetime cachedDay = 0;
+   static bool cacheLoaded = false;
+   static bool unconditionalBlackoutActive = false;
+   static bool cpiOrNFPBlackoutActive = false;
+
+   datetime dayStart =
+      GuardianCalendarDayStart(when);
+
+   if(cacheLoaded && cachedDay == dayStart)
+   {
+      return (
+         unconditionalBlackoutActive ||
+         (cpiOrNFPBlackoutActive && !GuardianIsNonFridayWindow5(when))
+      );
+   }
+
+   MqlCalendarValue values[];
+
+   int valueCount =
+      GuardianLoadUSCalendarDayValues(
+         dayStart,
+         true,
+         "FULL-DAY NEWS BLACKOUT",
+         values
+      );
+
+   if(valueCount < 0)
+      return false;
+
+   unconditionalBlackoutActive = false;
+   cpiOrNFPBlackoutActive = false;
+
+   for(int i = 0;
+       i < valueCount;
+       i++)
+   {
+      MqlCalendarEvent event;
+
+      if(!CalendarEventById(values[i].event_id, event))
+         continue;
+
+      if(event.importance != CALENDAR_IMPORTANCE_HIGH)
+         continue;
+
+      if(GuardianIsCPIOrNFPEvent(event))
+      {
+         cpiOrNFPBlackoutActive = true;
+         continue;
+      }
+
+      if(!GuardianIsFullDayBlackoutEvent(event))
+         continue;
+
+      unconditionalBlackoutActive = true;
+   }
+
+   cachedDay = dayStart;
+   cacheLoaded = true;
+
+   return (
+      unconditionalBlackoutActive ||
+      (cpiOrNFPBlackoutActive && !GuardianIsNonFridayWindow5(when))
+   );
+}
+
+bool GuardianIsUSBankHolidayEvent(
+   MqlCalendarEvent &event
+)
+{
+   MqlCalendarCountry country;
+
+   if(!CalendarCountryById(event.country_id, country))
+      return false;
+
+   if(country.code != "US")
+      return false;
+
+   if(event.importance != CALENDAR_IMPORTANCE_NONE)
+      return false;
+
+   if(event.type != CALENDAR_TYPE_HOLIDAY)
+      return false;
+
+   if(event.sector != CALENDAR_SECTOR_HOLIDAYS)
+      return false;
+
+   string eventName = event.name;
+
+   StringToUpper(eventName);
+
+   return StringFind(eventName, "BANK HOLIDAY") >= 0;
+}
+
+bool GuardianUSBankHolidayBlackoutActive(
+   datetime when
+)
+{
+   if(!BlockUSBankHolidays)
+      return false;
+
+   static datetime cachedDay = 0;
+   static bool cacheLoaded = false;
+   static bool blackoutActive = false;
+
+   datetime dayStart =
+      GuardianCalendarDayStart(when);
+
+   if(cacheLoaded && cachedDay == dayStart)
+      return blackoutActive;
+
+   MqlCalendarValue values[];
+
+   int valueCount =
+      GuardianLoadUSCalendarDayValues(
+         dayStart,
+         false,
+         "US BANK HOLIDAY",
+         values
+      );
+
+   if(valueCount < 0)
+      return false;
+
+   blackoutActive = false;
+
+   for(int i = 0;
+       i < valueCount;
+       i++)
+   {
+      MqlCalendarEvent event;
+
+      if(!CalendarEventById(values[i].event_id, event))
+         continue;
+
+      if(GuardianIsUSBankHolidayEvent(event))
+      {
+         blackoutActive = true;
+         break;
+      }
+   }
+
+   cachedDay = dayStart;
+   cacheLoaded = true;
+
+   return blackoutActive;
+}
+
+bool GuardianFOMCMinutesWindowBlockActive(
+   datetime when
+)
+{
+   if(!BlockFOMCMinutesAfterWindow2)
+      return false;
+
+   int currentMinutes =
+      GuardianMinutesOfDay(when);
+
+   int window2EndMinutes =
+      (Window2EndHour * 60) +
+      Window2EndMinute;
+
+   // Window 2 itself remains available, including its final minute.
+   if(currentMinutes <= window2EndMinutes)
+      return false;
+
+   static datetime cachedDay = 0;
+   static bool cacheLoaded = false;
+   static bool blockActive = false;
+
+   datetime dayStart =
+      GuardianCalendarDayStart(when);
+
+   if(cacheLoaded && cachedDay == dayStart)
+      return blockActive;
+
+   MqlCalendarValue values[];
+
+   int valueCount =
+      GuardianLoadUSCalendarDayValues(
+         dayStart,
+         true,
+         "FOMC MINUTES BLOCK",
+         values
+      );
+
+   if(valueCount < 0)
+      return false;
+
+   blockActive = false;
+
+   for(int i = 0;
+       i < valueCount;
+       i++)
+   {
+      MqlCalendarEvent event;
+
+      if(!CalendarEventById(values[i].event_id, event))
+         continue;
+
+      if(event.importance != CALENDAR_IMPORTANCE_HIGH)
+         continue;
+
+      if(GuardianIsFOMCMinutesEvent(event))
+      {
+         blockActive = true;
+         break;
+      }
+   }
+
+   cachedDay = dayStart;
+   cacheLoaded = true;
+
+   return blockActive;
 }
 
 bool GuardianSameCalendarDay(
@@ -427,7 +831,8 @@ bool GuardianLoadHighImpactNews(
 
 bool GuardianHighImpactNewsDelayActive(
    datetime when,
-   datetime &newsRelease
+   datetime &newsRelease,
+   string symbol = ""
 )
 {
    newsRelease = 0;
@@ -438,7 +843,7 @@ bool GuardianHighImpactNewsDelayActive(
    if(HighImpactNewsDelayMinutes <= 0)
       return false;
 
-   if(!GuardianIsInsideEntryWindow(when))
+   if(!GuardianIsInsideEntryWindow(when, symbol))
       return false;
 
    if(!GuardianLoadHighImpactNews(when))
@@ -485,13 +890,23 @@ bool GuardianHighImpactNewsDelayActive(
 //==================================================
 
 bool GuardianEntryTimeAllowed(
-   datetime when
+   datetime when,
+   string symbol = ""
 )
 {
-   if(!GuardianIsInsideWeeklyTradingPeriod(when))
+   if(!GuardianIsInsideWeeklyTradingPeriod(when, symbol))
       return false;
 
-   if(!GuardianIsInsideEntryWindow(when))
+   if(!GuardianIsInsideEntryWindow(when, symbol))
+      return false;
+
+   if(GuardianFullDayNewsBlackoutActive(when))
+      return false;
+
+   if(GuardianUSBankHolidayBlackoutActive(when))
+      return false;
+
+   if(GuardianFOMCMinutesWindowBlockActive(when))
       return false;
 
    datetime newsRelease = 0;
@@ -499,7 +914,8 @@ bool GuardianEntryTimeAllowed(
    if(
       GuardianHighImpactNewsDelayActive(
          when,
-         newsRelease
+         newsRelease,
+         symbol
       )
    )
    {
@@ -513,15 +929,29 @@ bool GuardianEntryTimeAllowed(
 // STATUS TEXT
 //==================================================
 
-string GuardianEntryWindowStatus()
+string GuardianEntryWindowStatus(
+   string symbol = ""
+)
 {
    datetime now =
       TimeCurrent();
 
-   if(!GuardianIsInsideWeeklyTradingPeriod(now))
+   if(StringLen(symbol) == 0)
+      symbol = _Symbol;
+
+   if(!GuardianIsInsideWeeklyTradingPeriod(now, symbol))
       return "CLOSED";
 
-   if(!GuardianIsInsideEntryWindow(now))
+   if(GuardianFullDayNewsBlackoutActive(now))
+      return "EVENT DAY";
+
+   if(GuardianUSBankHolidayBlackoutActive(now))
+      return "US BANK HOLIDAY";
+
+   if(GuardianFOMCMinutesWindowBlockActive(now))
+      return "FOMC MINUTES";
+
+   if(!GuardianIsInsideEntryWindow(now, symbol))
       return "CLOSED";
 
    datetime newsRelease = 0;
@@ -529,7 +959,8 @@ string GuardianEntryWindowStatus()
    if(
       GuardianHighImpactNewsDelayActive(
          now,
-         newsRelease
+         newsRelease,
+         symbol
       )
    )
    {
@@ -543,11 +974,17 @@ string GuardianEntryWindowStatus()
 // WEEKLY STATUS TEXT
 //==================================================
 
-string GuardianWeeklyTradingStatus()
+string GuardianWeeklyTradingStatus(
+   string symbol = ""
+)
 {
+   if(StringLen(symbol) == 0)
+      symbol = _Symbol;
+
    if(
       GuardianIsInsideWeeklyTradingPeriod(
-         TimeCurrent()
+         TimeCurrent(),
+         symbol
       )
    )
    {

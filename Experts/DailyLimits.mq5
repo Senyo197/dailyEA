@@ -1,5 +1,5 @@
 #property strict
-#property version "4.14"
+#property version "4.17"
 
 #include <Trade/Trade.mqh>
 
@@ -191,6 +191,12 @@ void GuardianCheckManualEntry(
          DEAL_TIME
       );
 
+   string symbol =
+      HistoryDealGetString(
+         dealTicket,
+         DEAL_SYMBOL
+      );
+
    //================================================
    // ENTRY OUTSIDE ALLOWED PERIOD
    //================================================
@@ -200,26 +206,29 @@ void GuardianCheckManualEntry(
    bool blockedByHighImpactNews =
       GuardianHighImpactNewsDelayActive(
          tradeTime,
-         newsRelease
+         newsRelease,
+         symbol
       );
 
    bool entryTimeAllowed =
       GuardianEntryTimeAllowed(
-         tradeTime
+         tradeTime,
+         symbol
       );
 
    bool entryLimitReached = false;
+   bool window3TradeLimitExceeded = false;
 
    if(entryTimeAllowed)
    {
-      string symbol =
-         HistoryDealGetString(
-            dealTicket,
-            DEAL_SYMBOL
-         );
-
       entryLimitReached =
          GuardianPairLossLimitReached(
+            symbol,
+            tradeTime
+         );
+
+      window3TradeLimitExceeded =
+         GuardianWindow3TradeLimitExceeded(
             symbol,
             tradeTime
          );
@@ -227,7 +236,8 @@ void GuardianCheckManualEntry(
 
    if(
       !entryTimeAllowed ||
-      entryLimitReached
+      entryLimitReached ||
+      window3TradeLimitExceeded
    )
    {
       ulong positionID =
@@ -357,15 +367,21 @@ void GuardianEnforceEntryWindows()
          continue;
       }
 
+      string symbol =
+         PositionGetString(
+            POSITION_SYMBOL
+         );
+
       datetime newsRelease = 0;
 
       bool blockedByHighImpactNews =
          GuardianHighImpactNewsDelayActive(
             openTime,
-            newsRelease
+            newsRelease,
+            symbol
          );
 
-      if(!GuardianEntryTimeAllowed(openTime))
+      if(!GuardianEntryTimeAllowed(openTime, symbol))
       {
          Print(
             "GUARDIAN: POSITION OUTSIDE ENTRY WINDOW | ",
