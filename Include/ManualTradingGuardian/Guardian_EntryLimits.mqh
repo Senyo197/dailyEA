@@ -2,11 +2,11 @@
 #define __MANUAL_TRADING_GUARDIAN_ENTRY_LIMITS__
 
 #include "Guardian_History.mqh"
+#include "Guardian_Toggles.mqh"
 #include "Guardian_TradingWindows.mqh"
 
 // A symbol is locked for the remainder of an entry window after
 // one actual SL or two negative manual closes.
-input bool EnforcePairLossLimitPerEntryWindow = true;
 input int MaxActualStopLossesPerPairPerEntryWindow = 1;
 input int MaxNegativeManualClosesPerPairPerEntryWindow = 2;
 
@@ -241,6 +241,9 @@ bool GuardianWindow3TradeLimitExceeded(
    datetime entryTime
 )
 {
+   if(!EnableWindow3TradeSplitLimit)
+      return false;
+
    datetime segmentStart = 0;
    datetime segmentEnd = 0;
 
@@ -393,6 +396,7 @@ bool GuardianPairLossLimitReached(
 
       if(
          reason == DEAL_REASON_SL &&
+         EnableActualStopLossPairLimit &&
          MaxActualStopLossesPerPairPerEntryWindow > 0
       )
       {
@@ -402,11 +406,14 @@ bool GuardianPairLossLimitReached(
                DEAL_POSITION_ID
             );
 
+         datetime originalEntryTime = 0;
+
          if(
             positionID != 0 &&
             GuardianIsExemptSL(
                dealTicket,
-               positionID
+               positionID,
+               originalEntryTime
             )
          )
          {
@@ -477,6 +484,7 @@ bool GuardianPairLossLimitReached(
       negativeManualCloses++;
 
       if(
+         EnableNegativeManualClosePairLimit &&
          MaxNegativeManualClosesPerPairPerEntryWindow > 0 &&
          negativeManualCloses >=
          MaxNegativeManualClosesPerPairPerEntryWindow

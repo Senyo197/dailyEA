@@ -1,6 +1,7 @@
 #ifndef __MANUAL_TRADING_GUARDIAN_TRADING_WINDOWS__
 #define __MANUAL_TRADING_GUARDIAN_TRADING_WINDOWS__
 
+#include "Guardian_Toggles.mqh"
 #include "Guardian_Time.mqh"
 
 //==================================================
@@ -39,17 +40,14 @@ input int Window5EndMinute   = 30;
 
 // High-impact economic calendar releases that occur inside an
 // entry window keep that window closed until this delay expires.
-input bool BlockHighImpactNewsEntries = true;
 input int  HighImpactNewsDelayMinutes = 10;
 
-// No new manual entries on the release day for these USD events.
-input bool BlockFOMCCPINFPReleaseDays = true;
-
-// FOMC Minutes permit Windows 1-2, then block the rest of the day.
-input bool BlockFOMCMinutesAfterWindow2 = true;
-
-// US bank holidays block new manual entries for the full calendar day.
-input bool BlockUSBankHolidays = true;
+// MT5 publishes US bank holidays under their individual holiday names.
+input string USBankHolidayNameMarkers =
+   "BANK HOLIDAY,NEW YEAR,MARTIN LUTHER KING,WASHINGTON'S BIRTHDAY,"
+   "PRESIDENTS DAY,MEMORIAL DAY,JUNETEENTH,INDEPENDENCE DAY,LABOR DAY,"
+   "COLUMBUS DAY,INDIGENOUS PEOPLES DAY,VETERANS DAY,THANKSGIVING DAY,"
+   "CHRISTMAS DAY";
 
 // Window 3 can use a longer delay before the New York session begins.
 input int NewYorkSessionStartHour = 13;
@@ -101,6 +99,9 @@ bool GuardianIsInsideEntryWindow(
    string symbol = ""
 )
 {
+   if(!EnforceTradingWindows)
+      return true;
+
    int currentMinutes =
       GuardianMinutesOfDay(when);
 
@@ -108,7 +109,7 @@ bool GuardianIsInsideEntryWindow(
    // WINDOW 1
    // ---------------------------------------------
 
-   if(GuardianTimeInsideWindow(
+   if(EnableWindow1 && GuardianTimeInsideWindow(
          currentMinutes,
          Window1StartHour,
          Window1StartMinute,
@@ -123,7 +124,7 @@ bool GuardianIsInsideEntryWindow(
    // WINDOW 2
    // ---------------------------------------------
 
-   if(GuardianTimeInsideWindow(
+   if(EnableWindow2 && GuardianTimeInsideWindow(
          currentMinutes,
          Window2StartHour,
          Window2StartMinute,
@@ -138,7 +139,7 @@ bool GuardianIsInsideEntryWindow(
    // WINDOW 3
    // ---------------------------------------------
 
-   if(GuardianTimeInsideWindow(
+   if(EnableWindow3 && GuardianTimeInsideWindow(
          currentMinutes,
          Window3StartHour,
          Window3StartMinute,
@@ -146,14 +147,17 @@ bool GuardianIsInsideEntryWindow(
          Window3EndMinute
       ))
    {
-      return GuardianIsUSIndexSymbol(symbol);
+      return (
+         !EnforceUSIndexOnlyWindow3 ||
+         GuardianIsUSIndexSymbol(symbol)
+      );
    }
 
    // ---------------------------------------------
    // WINDOW 4
    // ---------------------------------------------
 
-   if(GuardianTimeInsideWindow(
+   if(EnableWindow4 && GuardianTimeInsideWindow(
          currentMinutes,
          Window4StartHour,
          Window4StartMinute,
@@ -168,7 +172,7 @@ bool GuardianIsInsideEntryWindow(
    // WINDOW 5
    // ---------------------------------------------
 
-   if(GuardianTimeInsideWindow(
+   if(EnableWindow5 && GuardianTimeInsideWindow(
          currentMinutes,
          Window5StartHour,
          Window5StartMinute,
@@ -229,9 +233,7 @@ bool GuardianIsUSIndexSymbol(
 //==================================================
 // WEEKLY ENTRY PERIOD
 //
-// Monday 15:50
-// THROUGH
-// Friday 09:30
+// Monday through Friday, subject to the daily windows.
 //==================================================
 
 bool GuardianIsInsideWeeklyTradingPeriod(
@@ -239,6 +241,9 @@ bool GuardianIsInsideWeeklyTradingPeriod(
    string symbol = ""
 )
 {
+   if(!EnforceWeeklyTradingPeriod)
+      return true;
+
    MqlDateTime t;
 
    TimeToStruct(
@@ -256,21 +261,7 @@ bool GuardianIsInsideWeeklyTradingPeriod(
 
    // Monday
    if(t.day_of_week == 1)
-   {
-      if(GuardianIsUSIndexSymbol(symbol))
-      {
-         int usIndexMondayStart =
-            (Window3StartHour * 60) +
-            Window3StartMinute;
-
-         return minutes >= usIndexMondayStart;
-      }
-
-      int mondayStart =
-         (15 * 60) + 50;
-
-      return minutes >= mondayStart;
-   }
+      return true;
 
    // Tuesday
    if(t.day_of_week == 2)
@@ -287,15 +278,6 @@ bool GuardianIsInsideWeeklyTradingPeriod(
    // Friday
    if(t.day_of_week == 5)
    {
-      if(GuardianIsUSIndexSymbol(symbol))
-      {
-         int usIndexFridayEnd =
-            (Window3EndHour * 60) +
-            Window3EndMinute;
-
-         return minutes <= usIndexFridayEnd;
-      }
-
       int fridayEnd =
          (16 * 60) + 30;
 
@@ -457,7 +439,9 @@ bool GuardianFullDayNewsBlackoutActive(
    {
       return (
          unconditionalBlackoutActive ||
-         (cpiOrNFPBlackoutActive && !GuardianIsNonFridayWindow5(when))
+         (cpiOrNFPBlackoutActive &&
+          !(EnableNonFridayCPIOrNFPWindow5Exemption &&
+            GuardianIsNonFridayWindow5(when)))
       );
    }
 
@@ -506,7 +490,9 @@ bool GuardianFullDayNewsBlackoutActive(
 
    return (
       unconditionalBlackoutActive ||
-      (cpiOrNFPBlackoutActive && !GuardianIsNonFridayWindow5(when))
+      (cpiOrNFPBlackoutActive &&
+       !(EnableNonFridayCPIOrNFPWindow5Exemption &&
+         GuardianIsNonFridayWindow5(when)))
    );
 }
 
@@ -535,7 +521,34 @@ bool GuardianIsUSBankHolidayEvent(
 
    StringToUpper(eventName);
 
-   return StringFind(eventName, "BANK HOLIDAY") >= 0;
+   string markers[];
+   ushort separator = StringGetCharacter(",", 0);
+   int total = StringSplit(
+      USBankHolidayNameMarkers,
+      separator,
+      markers
+   );
+
+   for(int i = 0;
+       i < total;
+       i++)
+   {
+      string marker = markers[i];
+
+      StringTrimLeft(marker);
+      StringTrimRight(marker);
+      StringToUpper(marker);
+
+      if(
+         StringLen(marker) > 0 &&
+         StringFind(eventName, marker) >= 0
+      )
+      {
+         return true;
+      }
+   }
+
+   return false;
 }
 
 bool GuardianUSBankHolidayBlackoutActive(
@@ -736,6 +749,7 @@ int GuardianHighImpactNewsDelayForRelease(
    if(
       releaseIsInWindow3 &&
       releaseMinutes < newYorkStartMinutes &&
+      EnableWindow3ExtendedNewsWait &&
       HighImpactNewsDelayBeforeNewYorkMinutes > 0
    )
    {

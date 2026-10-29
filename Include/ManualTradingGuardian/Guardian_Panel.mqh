@@ -5,6 +5,7 @@
 
 #include "Guardian_TradingWindows.mqh"
 #include "Guardian_History.mqh"
+#include "Guardian_TradeArm.mqh"
 #include "Guardian_Statistics.mqh"
 #include "Guardian_Lock.mqh"
 #include "Guardian_Time.mqh"
@@ -150,6 +151,8 @@ void GuardianUpdatePanel(
    // PANEL
    //==================================================
 
+   GuardianUpdateArmTradeControls();
+
    string text =
       "MANUAL TRADING GUARDIAN v4.10\n"
       "================================\n"
@@ -265,6 +268,19 @@ void GuardianUpdatePanel(
       "Weekly Trading:        " +
       GuardianWeeklyTradingStatus() +
       "\n"
+
+      "Arm Trade:             " +
+      GuardianTradeArmStatus() +
+      "\n"
+
+      "--------------------------------\n"
+
+      "CHECKLIST\n"
+      "FOREX FACTORY:       CHECK\n"
+      "TURNING POINT:       H4+\n"
+      "APPROACH:            BOTH SIDES\n"
+
+      "--------------------------------\n"
 
       "Guardian:              " +
       guardianStatus;

@@ -3,10 +3,12 @@
 
 #include <Trade/Trade.mqh>
 
+#include <ManualTradingGuardian/Guardian_Toggles.mqh>
 #include <ManualTradingGuardian/Guardian_Time.mqh>
 #include <ManualTradingGuardian/Guardian_TradingWindows.mqh>
 #include <ManualTradingGuardian/Guardian_History.mqh>
 #include <ManualTradingGuardian/Guardian_EntryLimits.mqh>
+#include <ManualTradingGuardian/Guardian_TradeArm.mqh>
 #include <ManualTradingGuardian/Guardian_Statistics.mqh>
 #include <ManualTradingGuardian/Guardian_Lock.mqh>
 #include <ManualTradingGuardian/Guardian_Orders.mqh>
@@ -84,7 +86,10 @@ void CheckLossLimits()
    // DAILY LIMIT
    //================================================
 
-   if(dailyLosses >= MaxDailyLosses)
+   if(
+      EnableDailyLossLimit &&
+      dailyLosses >= MaxDailyLosses
+   )
    {
       if(!TradingLockActive)
       {
@@ -116,7 +121,10 @@ void CheckLossLimits()
    // WEEKLY LIMIT
    //================================================
 
-   if(weeklyLosses >= MaxWeeklyLosses)
+   if(
+      EnableWeeklyLossLimit &&
+      weeklyLosses >= MaxWeeklyLosses
+   )
    {
       if(!TradingLockActive)
       {
@@ -197,6 +205,19 @@ void GuardianCheckManualEntry(
          DEAL_SYMBOL
       );
 
+   ulong orderTicket =
+      (ulong)HistoryDealGetInteger(
+         dealTicket,
+         DEAL_ORDER
+      );
+
+   bool tradeArmConfirmed =
+      GuardianConsumeTradeArm(
+         symbol,
+         orderTicket,
+         tradeTime
+      );
+
    //================================================
    // ENTRY OUTSIDE ALLOWED PERIOD
    //================================================
@@ -235,6 +256,7 @@ void GuardianCheckManualEntry(
    }
 
    if(
+      !tradeArmConfirmed ||
       !entryTimeAllowed ||
       entryLimitReached ||
       window3TradeLimitExceeded
@@ -259,6 +281,14 @@ void GuardianCheckManualEntry(
             TIME_DATE | TIME_SECONDS
          )
       );
+
+      if(!tradeArmConfirmed)
+      {
+         Print(
+            "GUARDIAN: ARM TRADE CONFIRMATION REQUIRED | Symbol=",
+            symbol
+         );
+      }
 
       if(blockedByHighImpactNews)
       {
@@ -596,6 +626,21 @@ void OnTradeTransaction(
 }
 
 //==================================================
+// CHART CHECKLIST CONTROLS
+//==================================================
+
+void OnChartEvent(
+   const int id,
+   const long &lparam,
+   const double &dparam,
+   const string &sparam
+)
+{
+   if(id == CHARTEVENT_OBJECT_CLICK)
+      GuardianHandleTradeArmClick(sparam);
+}
+
+//==================================================
 // DEINIT
 //==================================================
 
@@ -603,5 +648,6 @@ void OnDeinit(
    const int reason
 )
 {
+   GuardianDeleteArmTradeControls();
    Comment("");
 }

@@ -46,11 +46,13 @@ bool GuardianPositionIDExists(
 bool GuardianGetEntryInfoForPosition(
    ulong positionID,
    double &entryPrice,
-   ENUM_DEAL_TYPE &positionType
+   ENUM_DEAL_TYPE &positionType,
+   datetime &entryTime
 )
 {
    entryPrice   = 0.0;
    positionType = WRONG_VALUE;
+   entryTime    = 0;
 
    if(positionID == 0)
       return false;
@@ -110,6 +112,7 @@ bool GuardianGetEntryInfoForPosition(
       if(dealTime < earliest)
       {
          earliest = dealTime;
+         entryTime = dealTime;
 
          entryPrice =
             HistoryDealGetDouble(
@@ -137,17 +140,21 @@ bool GuardianGetEntryInfoForPosition(
 
 bool GuardianIsExemptSL(
    ulong dealTicket,
-   ulong positionID
+   ulong positionID,
+   datetime &originalEntryTime
 )
 {
    double entryPrice = 0.0;
 
    ENUM_DEAL_TYPE positionType;
 
+   originalEntryTime = 0;
+
    if(!GuardianGetEntryInfoForPosition(
          positionID,
          entryPrice,
-         positionType
+         positionType,
+         originalEntryTime
       ))
    {
       Print(
@@ -234,7 +241,8 @@ bool GuardianIsExemptSL(
 
 int GuardianCountSLHits(
    datetime fromTime,
-   int &exemptCount
+   int &exemptCount,
+   bool requireOriginalEntryInPeriod
 )
 {
    exemptCount = 0;
@@ -325,10 +333,13 @@ int GuardianCountSLHits(
          continue;
       }
 
+      datetime originalEntryTime = 0;
+
       bool exempt =
          GuardianIsExemptSL(
             dealTicket,
-            positionID
+            positionID,
+            originalEntryTime
          );
 
       // Restore selected history.
@@ -336,6 +347,14 @@ int GuardianCountSLHits(
          fromTime,
          TimeCurrent()
       );
+
+      if(
+         requireOriginalEntryInPeriod &&
+         originalEntryTime < fromTime
+      )
+      {
+         continue;
+      }
 
       if(exempt)
       {
@@ -495,7 +514,8 @@ int GuardianDailySLCount(
 {
    return GuardianCountSLHits(
       GuardianTodayStart(),
-      exemptCount
+      exemptCount,
+      true
    );
 }
 
@@ -509,7 +529,8 @@ int GuardianWeeklySLCount(
 {
    return GuardianCountSLHits(
       GuardianWeekStart(),
-      exemptCount
+      exemptCount,
+      false
    );
 }
 
