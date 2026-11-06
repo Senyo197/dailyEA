@@ -12,9 +12,11 @@
 #include <ManualTradingGuardian/Guardian_Statistics.mqh>
 #include <ManualTradingGuardian/Guardian_Lock.mqh>
 #include <ManualTradingGuardian/Guardian_Orders.mqh>
+#include <ManualTradingGuardian/Guardian_StopLossAmount.mqh>
 #include <ManualTradingGuardian/Guardian_Panel.mqh>
 
 CTrade Trade;
+datetime GuardianWeeklyAmountLockWeek = 0;
 
 //==================================================
 // INPUTS
@@ -22,6 +24,8 @@ CTrade Trade;
 
 input int MaxDailyLosses  = 2;
 input int MaxWeeklyLosses = 4;
+input double MaxWeeklyLossAmount = 50.0;
+input double MaxStopLossAmount = 15.0;
 
 //==================================================
 // CHECK LOSS LIMITS
@@ -29,6 +33,18 @@ input int MaxWeeklyLosses = 4;
 
 void CheckLossLimits()
 {
+   datetime currentGMTWeek = GuardianGMTWeekStart();
+
+   if(
+      GuardianWeeklyAmountLockWeek != 0 &&
+      GuardianWeeklyAmountLockWeek != currentGMTWeek
+   )
+   {
+      GuardianWeeklyAmountLockWeek = 0;
+      TradingLockActive = false;
+      TradingLockTime = 0;
+   }
+
    int dailyExempt = 0;
    int weeklyExempt = 0;
 
@@ -151,6 +167,30 @@ void CheckLossLimits()
          );
       }
    }
+
+   if(
+      EnableWeeklyLossAmountLimit &&
+      MaxWeeklyLossAmount > 0.0 &&
+      GuardianRealizedProfit(GuardianWeekStart()) <= -MaxWeeklyLossAmount
+   )
+   {
+      GuardianWeeklyAmountLockWeek = currentGMTWeek;
+
+      if(!TradingLockActive)
+      {
+         TradingLockActive = true;
+         TradingLockTime = TimeCurrent();
+         Print(
+            "GUARDIAN: WEEKLY AMOUNT LOCK ACTIVATED | Net P/L=",
+            DoubleToString(
+               GuardianRealizedProfit(GuardianWeekStart()),
+               2
+            ),
+            " ", AccountInfoString(ACCOUNT_CURRENCY),
+            " | Limit=", DoubleToString(MaxWeeklyLossAmount, 2)
+         );
+      }
+   }
 }
 
 //==================================================
@@ -205,16 +245,27 @@ void GuardianCheckManualEntry(
          DEAL_SYMBOL
       );
 
+   // Each chart instance validates only manual entries for its own symbol.
+   if(symbol != _Symbol)
+      return;
+
    ulong orderTicket =
       (ulong)HistoryDealGetInteger(
          dealTicket,
          DEAL_ORDER
       );
 
+   ulong positionID =
+      (ulong)HistoryDealGetInteger(
+         dealTicket,
+         DEAL_POSITION_ID
+      );
+
    bool tradeArmConfirmed =
       GuardianConsumeTradeArm(
          symbol,
          orderTicket,
+         positionID,
          tradeTime
       );
 
@@ -262,13 +313,6 @@ void GuardianCheckManualEntry(
       window3TradeLimitExceeded
    )
    {
-      ulong positionID =
-         (ulong)
-         HistoryDealGetInteger(
-            dealTicket,
-            DEAL_POSITION_ID
-         );
-
       Print(
          "GUARDIAN: UNAUTHORIZED MANUAL ENTRY | ",
          "Deal=",
@@ -343,6 +387,16 @@ void GuardianCheckManualEntry(
             );
          }
       }
+
+      return;
+   }
+
+   if(positionID != 0 && !TradingLockActive)
+   {
+      GuardianTrackPositionRisk(positionID);
+      GuardianEnforcePositionStopLossAmount(
+         Trade, positionID, MaxStopLossAmount
+      );
    }
 }
 
@@ -516,6 +570,8 @@ int OnInit()
    GuardianEAStartTime =
       TimeCurrent();
 
+   GuardianRestoreTrackedPositionRisks();
+
    CheckLossLimits();
 
    //================================================
@@ -552,6 +608,9 @@ int OnInit()
 void OnTick()
 {
    CheckLossLimits();
+
+   if(!TradingLockActive)
+      GuardianEnforceTrackedStopLossAmounts(Trade, MaxStopLossAmount);
 
    //================================================
    // ENFORCE PERMITTED ENTRY WINDOWS
@@ -612,6 +671,9 @@ void OnTradeTransaction(
    //================================================
 
    CheckLossLimits();
+
+   if(!TradingLockActive)
+      GuardianEnforceTrackedStopLossAmounts(Trade, MaxStopLossAmount);
 
    //================================================
    // IMMEDIATELY ENFORCE LOCK

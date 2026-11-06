@@ -31,6 +31,7 @@ input bool BlockFOMCCPINFPReleaseDays = true;
 input bool EnableNonFridayCPIOrNFPWindow5Exemption = true;
 input bool BlockFOMCMinutesAfterWindow2 = true;
 input bool BlockUSBankHolidays = true;
+input bool RestrictUSCongressAndPresidentialElectionDays = true;
 
 //==================================================
 // LOSS RULES
@@ -41,5 +42,7 @@ input bool EnableActualStopLossPairLimit = true;
 input bool EnableNegativeManualClosePairLimit = true;
 input bool EnableDailyLossLimit = true;
 input bool EnableWeeklyLossLimit = true;
+input bool EnableWeeklyLossAmountLimit = true;
+input bool EnableMaxStopLossAmount = true;
 
 #endif

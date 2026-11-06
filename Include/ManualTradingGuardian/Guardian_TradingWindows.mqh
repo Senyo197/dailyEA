@@ -9,33 +9,33 @@
 //==================================================
 
 // Window 1
-input int Window1StartHour   = 5;
+input int Window1StartHour   = 6;
 input int Window1StartMinute = 50;
-input int Window1EndHour     = 6;
+input int Window1EndHour     = 7;
 input int Window1EndMinute   = 30;
 
 // Window 2
-input int Window2StartHour   = 8;
+input int Window2StartHour   = 9;
 input int Window2StartMinute = 50;
-input int Window2EndHour     = 9;
+input int Window2EndHour     = 10;
 input int Window2EndMinute   = 30;
 
 // Window 3
-input int Window3StartHour   = 11;
+input int Window3StartHour   = 12;
 input int Window3StartMinute = 50;
-input int Window3EndHour     = 14;
+input int Window3EndHour     = 13;
 input int Window3EndMinute   = 50;
 
 // Window 4
-input int Window4StartHour   = 15;
+input int Window4StartHour   = 16;
 input int Window4StartMinute = 50;
-input int Window4EndHour     = 16;
+input int Window4EndHour     = 17;
 input int Window4EndMinute   = 30;
 
 // Window 5
-input int Window5StartHour   = 20;
+input int Window5StartHour   = 21;
 input int Window5StartMinute = 50;
-input int Window5EndHour     = 22;
+input int Window5EndHour     = 23;
 input int Window5EndMinute   = 30;
 
 // High-impact economic calendar releases that occur inside an
@@ -50,7 +50,7 @@ input string USBankHolidayNameMarkers =
    "CHRISTMAS DAY";
 
 // Window 3 can use a longer delay before the New York session begins.
-input int NewYorkSessionStartHour = 13;
+input int NewYorkSessionStartHour = 14;
 input int NewYorkSessionStartMinute = 30;
 input int HighImpactNewsDelayBeforeNewYorkMinutes = 20;
 
@@ -147,6 +147,9 @@ bool GuardianIsInsideEntryWindow(
          Window3EndMinute
       ))
    {
+      if(GuardianUSCongressAndPresidentialElectionDayActive(when))
+         return false;
+
       return (
          !EnforceUSIndexOnlyWindow3 ||
          GuardianIsUSIndexSymbol(symbol)
@@ -165,6 +168,9 @@ bool GuardianIsInsideEntryWindow(
          Window4EndMinute
       ))
    {
+      if(GuardianUSCongressAndPresidentialElectionDayActive(when))
+         return false;
+
       return true;
    }
 
@@ -180,6 +186,9 @@ bool GuardianIsInsideEntryWindow(
          Window5EndMinute
       ))
    {
+      if(GuardianUSCongressAndPresidentialElectionDayActive(when))
+         return false;
+
       return true;
    }
 
@@ -279,7 +288,7 @@ bool GuardianIsInsideWeeklyTradingPeriod(
    if(t.day_of_week == 5)
    {
       int fridayEnd =
-         (16 * 60) + 30;
+         (17 * 60) + 30;
 
       return minutes <= fridayEnd;
    }
@@ -354,6 +363,79 @@ int GuardianLoadUSCalendarDayValues(
    );
 
    return -1;
+}
+
+bool GuardianIsUSCongressOrPresidentialElectionEvent(
+   MqlCalendarEvent &event
+)
+{
+   MqlCalendarCountry country;
+
+   if(!CalendarCountryById(event.country_id, country))
+      return false;
+
+   if(country.code != "US")
+      return false;
+
+   string eventName = event.name;
+
+   StringToUpper(eventName);
+
+   return (
+      StringFind(eventName, "PRESIDENTIAL ELECTION") >= 0 ||
+      StringFind(eventName, "CONGRESSIONAL ELECTION") >= 0 ||
+      StringFind(eventName, "CONGRESS ELECTION") >= 0
+   );
+}
+
+bool GuardianUSCongressAndPresidentialElectionDayActive(
+   datetime when
+)
+{
+   if(!RestrictUSCongressAndPresidentialElectionDays)
+      return false;
+
+   static datetime cachedDay = 0;
+   static bool cacheLoaded = false;
+   static bool restrictionActive = false;
+
+   datetime dayStart = GuardianCalendarDayStart(when);
+
+   if(cacheLoaded && cachedDay == dayStart)
+      return restrictionActive;
+
+   MqlCalendarValue values[];
+
+   int valueCount = GuardianLoadUSCalendarDayValues(
+      dayStart,
+      false,
+      "US ELECTION DAY",
+      values
+   );
+
+   if(valueCount < 0)
+      return false;
+
+   restrictionActive = false;
+
+   for(int i = 0; i < valueCount; i++)
+   {
+      MqlCalendarEvent event;
+
+      if(!CalendarEventById(values[i].event_id, event))
+         continue;
+
+      if(GuardianIsUSCongressOrPresidentialElectionEvent(event))
+      {
+         restrictionActive = true;
+         break;
+      }
+   }
+
+   cachedDay = dayStart;
+   cacheLoaded = true;
+
+   return restrictionActive;
 }
 
 bool GuardianIsCPIOrNFPEvent(
@@ -964,6 +1046,36 @@ string GuardianEntryWindowStatus(
 
    if(GuardianFOMCMinutesWindowBlockActive(now))
       return "FOMC MINUTES";
+
+   if(
+      GuardianUSCongressAndPresidentialElectionDayActive(now) &&
+      (
+         GuardianTimeInsideWindow(
+            GuardianMinutesOfDay(now),
+            Window3StartHour,
+            Window3StartMinute,
+            Window3EndHour,
+            Window3EndMinute
+         ) ||
+         GuardianTimeInsideWindow(
+            GuardianMinutesOfDay(now),
+            Window4StartHour,
+            Window4StartMinute,
+            Window4EndHour,
+            Window4EndMinute
+         ) ||
+         GuardianTimeInsideWindow(
+            GuardianMinutesOfDay(now),
+            Window5StartHour,
+            Window5StartMinute,
+            Window5EndHour,
+            Window5EndMinute
+         )
+      )
+   )
+   {
+      return "US ELECTION: W1-W2 ONLY";
+   }
 
    if(!GuardianIsInsideEntryWindow(now, symbol))
       return "CLOSED";

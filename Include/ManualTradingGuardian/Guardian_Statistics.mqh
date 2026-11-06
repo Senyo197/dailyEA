@@ -83,7 +83,7 @@ int GuardianExecutedTrades(
 // DEAL_COMMISSION
 // DEAL_FEE
 //
-// For outgoing deals.
+// Trading deals only. Entry commissions and fees count when charged.
 //==================================================
 
 double GuardianRealizedProfit(
@@ -113,6 +113,11 @@ double GuardianRealizedProfit(
       if(dealTicket == 0)
          continue;
 
+      long dealType = HistoryDealGetInteger(dealTicket, DEAL_TYPE);
+
+      if(dealType != DEAL_TYPE_BUY && dealType != DEAL_TYPE_SELL)
+         continue;
+
       long entry =
          HistoryDealGetInteger(
             dealTicket,
@@ -120,25 +125,18 @@ double GuardianRealizedProfit(
          );
 
       if(
+         entry != DEAL_ENTRY_IN &&
          entry != DEAL_ENTRY_OUT &&
          entry != DEAL_ENTRY_OUT_BY &&
          entry != DEAL_ENTRY_INOUT
       )
-      {
          continue;
+
+      if(entry != DEAL_ENTRY_IN)
+      {
+         profit += HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
+         profit += HistoryDealGetDouble(dealTicket, DEAL_SWAP);
       }
-
-      profit +=
-         HistoryDealGetDouble(
-            dealTicket,
-            DEAL_PROFIT
-         );
-
-      profit +=
-         HistoryDealGetDouble(
-            dealTicket,
-            DEAL_SWAP
-         );
 
       profit +=
          HistoryDealGetDouble(

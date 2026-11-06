@@ -7,11 +7,17 @@
 const string GuardianArmForexFactoryButton = "GuardianArmForexFactory";
 const string GuardianArmTurningPointButton = "GuardianArmTurningPoint";
 const string GuardianArmBothSidesButton = "GuardianArmBothSides";
+const string GuardianArmBuildOrNotButton = "GuardianArmBuildOrNot";
+const string GuardianArmDoublesButton = "GuardianArmDoubles";
+const string GuardianArmLegAndKneeButton = "GuardianArmLegAndKnee";
+const string GuardianArmTailBodyButton = "GuardianArmTailBody";
 const string GuardianArmTradeButton = "GuardianArmTrade";
 
 bool GuardianForexFactoryChecked = false;
 bool GuardianTurningPointChecked = false;
 bool GuardianBothSidesChecked = false;
+bool GuardianBuildOrNotChecked = false;
+string GuardianSelectedAbsoluteEntry = "";
 bool GuardianTradeArmed = false;
 string GuardianArmedSymbol = "";
 datetime GuardianArmExpiresAt = 0;
@@ -19,12 +25,98 @@ ulong GuardianPermittedOrderTicket = 0;
 
 const int GuardianArmTradeLeadMinutes = 5;
 
+string GuardianArmExpiryKey(
+   string symbol
+)
+{
+   return "ManualTradingGuardian.Arm.Expiry." + symbol;
+}
+
+string GuardianArmOrderKey(
+   string symbol
+)
+{
+   return "ManualTradingGuardian.Arm.Order." + symbol;
+}
+
+string GuardianArmAbsoluteEntryKey(
+   string symbol
+)
+{
+   return "ManualTradingGuardian.Arm.AbsoluteEntry." + symbol;
+}
+
+string GuardianPositionAbsoluteEntryKey(
+   string symbol,
+   ulong positionID
+)
+{
+   return (
+      "ManualTradingGuardian.Position.AbsoluteEntry." +
+      symbol + "." +
+      IntegerToString((long)positionID)
+   );
+}
+
+int GuardianAbsoluteEntryCode(
+   string entryType
+)
+{
+   if(entryType == "DOUBLES")
+      return 1;
+
+   if(entryType == "LEG & KNEE")
+      return 2;
+
+   if(entryType == "TAILBODY")
+      return 3;
+
+   return 0;
+}
+
+string GuardianAbsoluteEntryName(
+   double entryCode
+)
+{
+   if((int)entryCode == 1)
+      return "DOUBLES";
+
+   if((int)entryCode == 2)
+      return "LEG & KNEE";
+
+   if((int)entryCode == 3)
+      return "TAILBODY";
+
+   return "";
+}
+
+bool GuardianGetSharedArmExpiry(
+   string symbol,
+   datetime &expiresAt
+)
+{
+   double storedExpiry = 0.0;
+
+   if(!GlobalVariableGet(GuardianArmExpiryKey(symbol), storedExpiry))
+      return false;
+
+   expiresAt = (datetime)storedExpiry;
+
+   if(TimeCurrent() < expiresAt)
+      return true;
+
+   GlobalVariableDel(GuardianArmExpiryKey(symbol));
+   return false;
+}
+
 bool GuardianChecklistComplete()
 {
    return (
       GuardianForexFactoryChecked &&
       GuardianTurningPointChecked &&
-      GuardianBothSidesChecked
+      GuardianBothSidesChecked &&
+      GuardianBuildOrNotChecked &&
+      GuardianSelectedAbsoluteEntry != ""
    );
 }
 
@@ -89,6 +181,16 @@ bool GuardianGetArmTradeWindowBounds(
       if(!enabled[i])
          continue;
 
+      // A US congressional or presidential election day permits only
+      // Windows 1 and 2, including their five-minute ARM lead-in.
+      if(
+         i >= 2 &&
+         GuardianUSCongressAndPresidentialElectionDayActive(when)
+      )
+      {
+         continue;
+      }
+
       if(
          when >= starts[i] - (GuardianArmTradeLeadMinutes * 60) &&
          when <= ends[i]
@@ -130,6 +232,10 @@ void GuardianSetArmButton(
 
 void GuardianClearExpiredTradeArm()
 {
+   datetime sharedExpiry = 0;
+
+   GuardianGetSharedArmExpiry(_Symbol, sharedExpiry);
+
    if(
       GuardianTradeArmed &&
       TimeCurrent() >= GuardianArmExpiresAt
@@ -141,6 +247,8 @@ void GuardianClearExpiredTradeArm()
       GuardianForexFactoryChecked = false;
       GuardianTurningPointChecked = false;
       GuardianBothSidesChecked = false;
+      GuardianBuildOrNotChecked = false;
+      GuardianSelectedAbsoluteEntry = "";
 
       Print("GUARDIAN: ARM TRADE CONFIRMATION EXPIRED");
    }
@@ -175,7 +283,7 @@ void GuardianUpdateArmTradeControls()
       GuardianArmForexFactoryButton,
       GuardianForexFactoryChecked ?
       "FOREX FACTORY: YES" : "FOREX FACTORY: CHECK",
-      102,
+      206,
       GuardianForexFactoryChecked ? clrDarkGreen : clrMaroon
    );
 
@@ -183,7 +291,7 @@ void GuardianUpdateArmTradeControls()
       GuardianArmTurningPointButton,
       GuardianTurningPointChecked ?
       "TURNING POINT: H4+" : "TURNING POINT: CHECK H4+",
-      76,
+      180,
       GuardianTurningPointChecked ? clrDarkGreen : clrMaroon
    );
 
@@ -191,16 +299,50 @@ void GuardianUpdateArmTradeControls()
       GuardianArmBothSidesButton,
       GuardianBothSidesChecked ?
       "APPROACH: BOTH SIDES" : "APPROACH: CHECK BOTH SIDES",
-      50,
+      154,
       GuardianBothSidesChecked ? clrDarkGreen : clrMaroon
+   );
+
+   GuardianSetArmButton(
+      GuardianArmBuildOrNotButton,
+      GuardianBuildOrNotChecked ?
+      "45: BUILD OR NOT? YES" : "45: BUILD OR NOT? CHECK",
+      128,
+      GuardianBuildOrNotChecked ? clrDarkGreen : clrMaroon
+   );
+
+   GuardianSetArmButton(
+      GuardianArmDoublesButton,
+      "ABS ENTRY: DOUBLES",
+      102,
+      GuardianSelectedAbsoluteEntry == "DOUBLES" ? clrDarkGreen : clrMaroon
+   );
+
+   GuardianSetArmButton(
+      GuardianArmLegAndKneeButton,
+      "ABS ENTRY: LEG & KNEE",
+      76,
+      GuardianSelectedAbsoluteEntry == "LEG & KNEE" ? clrDarkGreen : clrMaroon
+   );
+
+   GuardianSetArmButton(
+      GuardianArmTailBodyButton,
+      "ABS ENTRY: TAILBODY",
+      50,
+      GuardianSelectedAbsoluteEntry == "TAILBODY" ? clrDarkGreen : clrMaroon
    );
 
    string armText = "ARM TRADE: COMPLETE";
    color armColor = clrDarkSlateGray;
 
-   if(GuardianTradeArmed)
+   datetime sharedExpiry = 0;
+
+   if(
+      GuardianTradeArmed ||
+      GuardianGetSharedArmExpiry(_Symbol, sharedExpiry)
+   )
    {
-      armText = "ARMED: " + GuardianArmedSymbol;
+      armText = "ARMED: " + _Symbol;
       armColor = clrDarkGreen;
    }
    else if(GuardianChecklistComplete())
@@ -222,6 +364,10 @@ void GuardianDeleteArmTradeControls()
    ObjectDelete(0, GuardianArmForexFactoryButton);
    ObjectDelete(0, GuardianArmTurningPointButton);
    ObjectDelete(0, GuardianArmBothSidesButton);
+   ObjectDelete(0, GuardianArmBuildOrNotButton);
+   ObjectDelete(0, GuardianArmDoublesButton);
+   ObjectDelete(0, GuardianArmLegAndKneeButton);
+   ObjectDelete(0, GuardianArmTailBodyButton);
    ObjectDelete(0, GuardianArmTradeButton);
 }
 
@@ -238,6 +384,8 @@ void GuardianResetTradeArm(
       GuardianForexFactoryChecked = false;
       GuardianTurningPointChecked = false;
       GuardianBothSidesChecked = false;
+      GuardianBuildOrNotChecked = false;
+      GuardianSelectedAbsoluteEntry = "";
    }
 }
 
@@ -265,6 +413,26 @@ void GuardianHandleTradeArmClick(
       GuardianBothSidesChecked = !GuardianBothSidesChecked;
       GuardianResetTradeArm(false);
    }
+   else if(objectName == GuardianArmBuildOrNotButton)
+   {
+      GuardianBuildOrNotChecked = !GuardianBuildOrNotChecked;
+      GuardianResetTradeArm(false);
+   }
+   else if(objectName == GuardianArmDoublesButton)
+   {
+      GuardianSelectedAbsoluteEntry = "DOUBLES";
+      GuardianResetTradeArm(false);
+   }
+   else if(objectName == GuardianArmLegAndKneeButton)
+   {
+      GuardianSelectedAbsoluteEntry = "LEG & KNEE";
+      GuardianResetTradeArm(false);
+   }
+   else if(objectName == GuardianArmTailBodyButton)
+   {
+      GuardianSelectedAbsoluteEntry = "TAILBODY";
+      GuardianResetTradeArm(false);
+   }
    else if(objectName == GuardianArmTradeButton)
    {
       datetime windowStart = 0;
@@ -285,6 +453,20 @@ void GuardianHandleTradeArmClick(
          GuardianArmedSymbol = _Symbol;
          GuardianPermittedOrderTicket = 0;
          GuardianArmExpiresAt = windowEnd;
+
+         GlobalVariableSet(
+            GuardianArmExpiryKey(GuardianArmedSymbol),
+            (double)GuardianArmExpiresAt
+         );
+         GlobalVariableDel(
+            GuardianArmOrderKey(GuardianArmedSymbol)
+         );
+         GlobalVariableSet(
+            GuardianArmAbsoluteEntryKey(GuardianArmedSymbol),
+            (double)GuardianAbsoluteEntryCode(
+               GuardianSelectedAbsoluteEntry
+            )
+         );
 
          Print(
             "GUARDIAN: TRADE ARMED | Symbol=",
@@ -308,6 +490,7 @@ void GuardianHandleTradeArmClick(
 bool GuardianConsumeTradeArm(
    string symbol,
    ulong orderTicket,
+   ulong positionID,
    datetime tradeTime
 )
 {
@@ -332,18 +515,22 @@ bool GuardianConsumeTradeArm(
       return false;
    }
 
+   double storedOrder = 0.0;
+
    if(
       orderTicket != 0 &&
-      orderTicket == GuardianPermittedOrderTicket
+      GlobalVariableGet(GuardianArmOrderKey(symbol), storedOrder) &&
+      orderTicket == (ulong)storedOrder
    )
    {
       return true;
    }
 
+   datetime sharedExpiry = 0;
+
    if(
-      !GuardianTradeArmed ||
-      symbol != GuardianArmedSymbol ||
-      tradeTime > GuardianArmExpiresAt
+      !GuardianGetSharedArmExpiry(symbol, sharedExpiry) ||
+      tradeTime > sharedExpiry
    )
    {
       GuardianUpdateArmTradeControls();
@@ -351,6 +538,30 @@ bool GuardianConsumeTradeArm(
    }
 
    GuardianPermittedOrderTicket = orderTicket;
+
+   double entryCode = 0.0;
+
+   if(
+      positionID != 0 &&
+      GlobalVariableGet(
+         GuardianArmAbsoluteEntryKey(symbol),
+         entryCode
+      ) &&
+      GuardianAbsoluteEntryName(entryCode) != ""
+   )
+   {
+      GlobalVariableSet(
+         GuardianPositionAbsoluteEntryKey(symbol, positionID),
+         entryCode
+      );
+   }
+
+   GlobalVariableSet(
+      GuardianArmOrderKey(symbol),
+      (double)orderTicket
+   );
+   GlobalVariableDel(GuardianArmExpiryKey(symbol));
+   GlobalVariableDel(GuardianArmAbsoluteEntryKey(symbol));
    GuardianResetTradeArm(true);
    GuardianUpdateArmTradeControls();
 
@@ -360,6 +571,59 @@ bool GuardianConsumeTradeArm(
    );
 
    return true;
+}
+
+string GuardianOpenAbsoluteEntryStatus()
+{
+   string details = "";
+   int taggedPositions = 0;
+   int total = PositionsTotal();
+
+   for(int i = 0; i < total; i++)
+   {
+      ulong positionTicket = PositionGetTicket(i);
+
+      if(positionTicket == 0)
+         continue;
+
+      string symbol = PositionGetString(POSITION_SYMBOL);
+      ulong positionID = (ulong)PositionGetInteger(POSITION_IDENTIFIER);
+      double entryCode = 0.0;
+
+      if(
+         positionID == 0 ||
+         !GlobalVariableGet(
+            GuardianPositionAbsoluteEntryKey(symbol, positionID),
+            entryCode
+         )
+      )
+      {
+         continue;
+      }
+
+      string entryName = GuardianAbsoluteEntryName(entryCode);
+
+      if(entryName == "")
+         continue;
+
+      if(taggedPositions > 0)
+         details += "\n";
+
+      details += (
+         symbol + ": " +
+         entryName +
+         " (#" +
+         IntegerToString((long)positionID) +
+         ")"
+      );
+
+      taggedPositions++;
+   }
+
+   if(taggedPositions == 0)
+      return "NONE";
+
+   return details;
 }
 
 string GuardianTradeArmStatus()
@@ -382,8 +646,13 @@ string GuardianTradeArmStatus()
       return "WINDOW CLOSED";
    }
 
-   if(GuardianTradeArmed)
-      return "ARMED: " + GuardianArmedSymbol;
+   datetime sharedExpiry = 0;
+
+   if(
+      GuardianTradeArmed ||
+      GuardianGetSharedArmExpiry(_Symbol, sharedExpiry)
+   )
+      return "ARMED: " + _Symbol;
 
    return "REQUIRED";
 }

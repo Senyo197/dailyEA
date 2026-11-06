@@ -122,6 +122,21 @@ void GuardianUpdatePanel(
       guardianStatus = "LOCKED";
    }
 
+   string weeklyAmountStatus = "ACTIVE";
+
+   if(
+      EnableWeeklyLossAmountLimit &&
+      MaxWeeklyLossAmount > 0.0 &&
+      (
+         weeklyProfit <= -MaxWeeklyLossAmount ||
+         GuardianWeeklyAmountLockWeek == GuardianGMTWeekStart()
+      )
+   )
+   {
+      weeklyAmountStatus = "LOCKED";
+      guardianStatus = "LOCKED";
+   }
+
    if(TradingLockActive)
       guardianStatus = "LOCKED";
 
@@ -247,6 +262,22 @@ void GuardianUpdatePanel(
       weeklyProfitText +
       "\n"
 
+      "Weekly Loss Amount:    " +
+      DoubleToString(MathMax(0.0, -weeklyProfit), 2) +
+      " / " +
+      DoubleToString(MaxWeeklyLossAmount, 2) +
+      " " + AccountInfoString(ACCOUNT_CURRENCY) +
+      " [" +
+      (EnableWeeklyLossAmountLimit ? weeklyAmountStatus : "OFF") +
+      "]\n"
+
+      "Max SL per Trade:     " +
+      DoubleToString(MaxStopLossAmount, 2) +
+      " " + AccountInfoString(ACCOUNT_CURRENCY) +
+      " [" +
+      (EnableMaxStopLossAmount ? "ON" : "OFF") +
+      "]\n"
+
       "--------------------------------\n"
 
       "Open Positions:        " +
@@ -257,6 +288,10 @@ void GuardianUpdatePanel(
 
       "Floating P/L:          " +
       floatingProfitText +
+      "\n"
+
+      "Absolute Entries:\n" +
+      GuardianOpenAbsoluteEntryStatus() +
       "\n"
 
       "--------------------------------\n"
@@ -272,13 +307,6 @@ void GuardianUpdatePanel(
       "Arm Trade:             " +
       GuardianTradeArmStatus() +
       "\n"
-
-      "--------------------------------\n"
-
-      "CHECKLIST\n"
-      "FOREX FACTORY:       CHECK\n"
-      "TURNING POINT:       H4+\n"
-      "APPROACH:            BOTH SIDES\n"
 
       "--------------------------------\n"
 
