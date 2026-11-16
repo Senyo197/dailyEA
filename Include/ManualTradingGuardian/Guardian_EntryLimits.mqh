@@ -58,101 +58,39 @@ bool GuardianGetEntryWindowBounds(
    datetime &windowEnd
 )
 {
-   int currentMinutes =
-      GuardianMinutesOfDay(when);
+   int startHours[5] = {
+      Window1StartHour, Window2StartHour, Window3StartHour,
+      Window4StartHour, Window5StartHour
+   };
+   int startMinutes[5] = {
+      Window1StartMinute, Window2StartMinute, Window3StartMinute,
+      Window4StartMinute, Window5StartMinute
+   };
+   int endHours[5] = {
+      Window1EndHour, Window2EndHour, Window3EndHour,
+      Window4EndHour, Window5EndHour
+   };
+   int endMinutes[5] = {
+      Window1EndMinute, Window2EndMinute, Window3EndMinute,
+      Window4EndMinute, Window5EndMinute
+   };
 
-   if(GuardianTimeInsideWindow(
-         currentMinutes,
-         Window1StartHour,
-         Window1StartMinute,
-         Window1EndHour,
-         Window1EndMinute
-      ))
+   int currentMinutes = GuardianMinutesOfDay(when);
+
+   for(int i = 0; i < 5; i++)
    {
+      if(!GuardianTimeInsideWindow(
+            currentMinutes,
+            startHours[i], startMinutes[i],
+            endHours[i], endMinutes[i]
+         ))
+         continue;
+
       return GuardianBuildEntryWindowBounds(
          when,
-         Window1StartHour,
-         Window1StartMinute,
-         Window1EndHour,
-         Window1EndMinute,
-         windowStart,
-         windowEnd
-      );
-   }
-
-   if(GuardianTimeInsideWindow(
-         currentMinutes,
-         Window2StartHour,
-         Window2StartMinute,
-         Window2EndHour,
-         Window2EndMinute
-      ))
-   {
-      return GuardianBuildEntryWindowBounds(
-         when,
-         Window2StartHour,
-         Window2StartMinute,
-         Window2EndHour,
-         Window2EndMinute,
-         windowStart,
-         windowEnd
-      );
-   }
-
-   if(GuardianTimeInsideWindow(
-         currentMinutes,
-         Window3StartHour,
-         Window3StartMinute,
-         Window3EndHour,
-         Window3EndMinute
-      ))
-   {
-      return GuardianBuildEntryWindowBounds(
-         when,
-         Window3StartHour,
-         Window3StartMinute,
-         Window3EndHour,
-         Window3EndMinute,
-         windowStart,
-         windowEnd
-      );
-   }
-
-   if(GuardianTimeInsideWindow(
-         currentMinutes,
-         Window4StartHour,
-         Window4StartMinute,
-         Window4EndHour,
-         Window4EndMinute
-      ))
-   {
-      return GuardianBuildEntryWindowBounds(
-         when,
-         Window4StartHour,
-         Window4StartMinute,
-         Window4EndHour,
-         Window4EndMinute,
-         windowStart,
-         windowEnd
-      );
-   }
-
-   if(GuardianTimeInsideWindow(
-         currentMinutes,
-         Window5StartHour,
-         Window5StartMinute,
-         Window5EndHour,
-         Window5EndMinute
-      ))
-   {
-      return GuardianBuildEntryWindowBounds(
-         when,
-         Window5StartHour,
-         Window5StartMinute,
-         Window5EndHour,
-         Window5EndMinute,
-         windowStart,
-         windowEnd
+         startHours[i], startMinutes[i],
+         endHours[i], endMinutes[i],
+         windowStart, windowEnd
       );
    }
 

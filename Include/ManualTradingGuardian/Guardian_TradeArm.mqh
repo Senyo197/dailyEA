@@ -12,6 +12,12 @@ const string GuardianArmDoublesButton = "GuardianArmDoubles";
 const string GuardianArmLegAndKneeButton = "GuardianArmLegAndKnee";
 const string GuardianArmTailBodyButton = "GuardianArmTailBody";
 const string GuardianArmTradeButton = "GuardianArmTrade";
+const string GuardianArmMoveHandle = "GuardianArmMoveHandle";
+
+const int GuardianArmHeaderYDistance = 232;
+int GuardianArmXDistance = 12;
+int GuardianArmYOffset = 0;
+bool GuardianArmPositionLoaded = false;
 
 bool GuardianForexFactoryChecked = false;
 bool GuardianTurningPointChecked = false;
@@ -21,7 +27,6 @@ string GuardianSelectedAbsoluteEntry = "";
 bool GuardianTradeArmed = false;
 string GuardianArmedSymbol = "";
 datetime GuardianArmExpiresAt = 0;
-ulong GuardianPermittedOrderTicket = 0;
 
 const int GuardianArmTradeLeadMinutes = 5;
 
@@ -30,6 +35,27 @@ string GuardianArmExpiryKey(
 )
 {
    return "ManualTradingGuardian.Arm.Expiry." + symbol;
+}
+
+string GuardianArmPositionKey(string axis)
+{
+   return "ManualTradingGuardian.Checklist." +
+          IntegerToString(ChartID()) + "." + axis;
+}
+
+void GuardianLoadArmPosition()
+{
+   if(GuardianArmPositionLoaded)
+      return;
+
+   GuardianArmPositionLoaded = true;
+   double stored = 0.0;
+
+   if(GlobalVariableGet(GuardianArmPositionKey("X"), stored))
+      GuardianArmXDistance = (int)stored;
+
+   if(GlobalVariableGet(GuardianArmPositionKey("Y"), stored))
+      GuardianArmYOffset = (int)stored;
 }
 
 string GuardianArmOrderKey(
@@ -124,9 +150,12 @@ bool GuardianGetArmTradeWindowBounds(
    datetime when,
    string symbol,
    datetime &windowStart,
-   datetime &windowEnd
+   datetime &windowEnd,
+   int &windowNumber
 )
 {
+   windowNumber = 0;
+
    if(!EnforceTradingWindows)
       return false;
 
@@ -198,9 +227,26 @@ bool GuardianGetArmTradeWindowBounds(
       {
          windowStart = starts[i];
          windowEnd = ends[i];
+          windowNumber = i + 1;
          return true;
       }
    }
+
+   return false;
+}
+
+bool GuardianArmRequiredForWindow(int windowNumber)
+{
+   if(windowNumber == 1)
+      return RequireArmTradeWindow1;
+   if(windowNumber == 2)
+      return RequireArmTradeWindow2;
+   if(windowNumber == 3)
+      return RequireArmTradeWindow3;
+   if(windowNumber == 4)
+      return RequireArmTradeWindow4;
+   if(windowNumber == 5)
+      return RequireArmTradeWindow5;
 
    return false;
 }
@@ -216,8 +262,8 @@ void GuardianSetArmButton(
       ObjectCreate(0, name, OBJ_BUTTON, 0, 0, 0);
 
    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_LOWER);
-   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, 12);
-   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, yDistance);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, GuardianArmXDistance);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, yDistance + GuardianArmYOffset);
    ObjectSetInteger(0, name, OBJPROP_XSIZE, 240);
    ObjectSetInteger(0, name, OBJPROP_YSIZE, 22);
    ObjectSetInteger(0, name, OBJPROP_COLOR, clrWhite);
@@ -228,6 +274,62 @@ void GuardianSetArmButton(
    ObjectSetInteger(0, name, OBJPROP_BACK, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
    ObjectSetString(0, name, OBJPROP_TEXT, text);
+}
+
+void GuardianSetArmMoveHandle()
+{
+   if(ObjectFind(0, GuardianArmMoveHandle) < 0)
+   {
+      if(!ObjectCreate(0, GuardianArmMoveHandle, OBJ_BUTTON, 0, 0, 0))
+         return;
+
+      ObjectSetInteger(0, GuardianArmMoveHandle, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+      ObjectSetInteger(0, GuardianArmMoveHandle, OBJPROP_XDISTANCE, GuardianArmXDistance);
+      ObjectSetInteger(0, GuardianArmMoveHandle, OBJPROP_YDISTANCE,
+                       GuardianArmHeaderYDistance + GuardianArmYOffset);
+      ObjectSetInteger(0, GuardianArmMoveHandle, OBJPROP_XSIZE, 240);
+      ObjectSetInteger(0, GuardianArmMoveHandle, OBJPROP_YSIZE, 22);
+      ObjectSetInteger(0, GuardianArmMoveHandle, OBJPROP_COLOR, clrWhite);
+      ObjectSetInteger(0, GuardianArmMoveHandle, OBJPROP_BGCOLOR, clrDarkSlateGray);
+      ObjectSetInteger(0, GuardianArmMoveHandle, OBJPROP_BORDER_COLOR, clrBlack);
+      ObjectSetInteger(0, GuardianArmMoveHandle, OBJPROP_FONTSIZE, 7);
+      ObjectSetInteger(0, GuardianArmMoveHandle, OBJPROP_SELECTABLE, true);
+      ObjectSetInteger(0, GuardianArmMoveHandle, OBJPROP_SELECTED, true);
+      ObjectSetInteger(0, GuardianArmMoveHandle, OBJPROP_BACK, false);
+      ObjectSetInteger(0, GuardianArmMoveHandle, OBJPROP_HIDDEN, true);
+   }
+
+   ObjectSetString(0, GuardianArmMoveHandle, OBJPROP_TEXT, "DRAG CHECKLIST HERE");
+   ObjectSetInteger(0, GuardianArmMoveHandle, OBJPROP_STATE, false);
+}
+
+void GuardianHandleArmDrag(string objectName)
+{
+   if(objectName != GuardianArmMoveHandle ||
+      ObjectFind(0, GuardianArmMoveHandle) < 0)
+      return;
+
+   int x = (int)ObjectGetInteger(0, GuardianArmMoveHandle, OBJPROP_XDISTANCE);
+   int y = (int)ObjectGetInteger(0, GuardianArmMoveHandle, OBJPROP_YDISTANCE);
+   int chartWidth = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+   int chartHeight = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
+
+   GuardianArmXDistance = MathMax(0, x);
+   if(chartWidth > 240)
+      GuardianArmXDistance = MathMin(GuardianArmXDistance, chartWidth - 240);
+
+   GuardianArmYOffset = MathMax(-22, y - GuardianArmHeaderYDistance);
+   if(chartHeight > 254)
+      GuardianArmYOffset = MathMin(GuardianArmYOffset, chartHeight - 254);
+
+   ObjectSetInteger(0, GuardianArmMoveHandle, OBJPROP_XDISTANCE, GuardianArmXDistance);
+   ObjectSetInteger(0, GuardianArmMoveHandle, OBJPROP_YDISTANCE,
+                    GuardianArmHeaderYDistance + GuardianArmYOffset);
+   GlobalVariableSet(GuardianArmPositionKey("X"), (double)GuardianArmXDistance);
+   GlobalVariableSet(GuardianArmPositionKey("Y"), (double)GuardianArmYOffset);
+
+   GuardianUpdateArmTradeControls();
+   ChartRedraw(0);
 }
 
 void GuardianClearExpiredTradeArm()
@@ -256,28 +358,27 @@ void GuardianClearExpiredTradeArm()
 
 void GuardianUpdateArmTradeControls()
 {
-   if(!EnableArmTradeConfirmation)
-   {
-      GuardianDeleteArmTradeControls();
-      return;
-   }
-
+   GuardianLoadArmPosition();
    GuardianClearExpiredTradeArm();
 
    datetime windowStart = 0;
    datetime windowEnd = 0;
+   int windowNumber = 0;
 
    if(!GuardianGetArmTradeWindowBounds(
          TimeCurrent(),
          _Symbol,
          windowStart,
-         windowEnd
-      ))
+         windowEnd,
+         windowNumber
+       ))
    {
       GuardianResetTradeArm(true);
       GuardianDeleteArmTradeControls();
       return;
    }
+
+   GuardianSetArmMoveHandle();
 
    GuardianSetArmButton(
       GuardianArmForexFactoryButton,
@@ -332,6 +433,12 @@ void GuardianUpdateArmTradeControls()
       GuardianSelectedAbsoluteEntry == "TAILBODY" ? clrDarkGreen : clrMaroon
    );
 
+   if(!EnableArmTradeConfirmation || !GuardianArmRequiredForWindow(windowNumber))
+   {
+      ObjectDelete(0, GuardianArmTradeButton);
+      return;
+   }
+
    string armText = "ARM TRADE: COMPLETE";
    color armColor = clrDarkSlateGray;
 
@@ -361,6 +468,7 @@ void GuardianUpdateArmTradeControls()
 
 void GuardianDeleteArmTradeControls()
 {
+   ObjectDelete(0, GuardianArmMoveHandle);
    ObjectDelete(0, GuardianArmForexFactoryButton);
    ObjectDelete(0, GuardianArmTurningPointButton);
    ObjectDelete(0, GuardianArmBothSidesButton);
@@ -393,8 +501,12 @@ void GuardianHandleTradeArmClick(
    string objectName
 )
 {
-   if(!EnableArmTradeConfirmation)
+   if(objectName == GuardianArmMoveHandle)
+   {
+      ObjectSetInteger(0, GuardianArmMoveHandle, OBJPROP_STATE, false);
+      ObjectSetInteger(0, GuardianArmMoveHandle, OBJPROP_SELECTED, true);
       return;
+   }
 
    GuardianClearExpiredTradeArm();
 
@@ -435,15 +547,20 @@ void GuardianHandleTradeArmClick(
    }
    else if(objectName == GuardianArmTradeButton)
    {
+      if(!EnableArmTradeConfirmation)
+         return;
+
       datetime windowStart = 0;
       datetime windowEnd = 0;
+      int windowNumber = 0;
 
       if(!GuardianGetArmTradeWindowBounds(
             TimeCurrent(),
             _Symbol,
             windowStart,
-            windowEnd
-         ))
+            windowEnd,
+            windowNumber
+          ) || !GuardianArmRequiredForWindow(windowNumber))
       {
          Print("GUARDIAN: ARM TRADE IS AVAILABLE ONLY FOR AN ACTIVE ENTRY WINDOW");
       }
@@ -451,7 +568,6 @@ void GuardianHandleTradeArmClick(
       {
          GuardianTradeArmed = true;
          GuardianArmedSymbol = _Symbol;
-         GuardianPermittedOrderTicket = 0;
          GuardianArmExpiresAt = windowEnd;
 
          GlobalVariableSet(
@@ -504,16 +620,21 @@ bool GuardianConsumeTradeArm(
 
    datetime windowStart = 0;
    datetime windowEnd = 0;
+   int windowNumber = 0;
 
    if(!GuardianGetArmTradeWindowBounds(
          tradeTime,
          symbol,
          windowStart,
-         windowEnd
+         windowEnd,
+         windowNumber
       ))
    {
       return false;
    }
+
+   if(!GuardianArmRequiredForWindow(windowNumber))
+      return true;
 
    double storedOrder = 0.0;
 
@@ -537,7 +658,6 @@ bool GuardianConsumeTradeArm(
       return false;
    }
 
-   GuardianPermittedOrderTicket = orderTicket;
 
    double entryCode = 0.0;
 
@@ -635,16 +755,21 @@ string GuardianTradeArmStatus()
 
    datetime windowStart = 0;
    datetime windowEnd = 0;
+   int windowNumber = 0;
 
    if(!GuardianGetArmTradeWindowBounds(
          TimeCurrent(),
          _Symbol,
          windowStart,
-         windowEnd
+         windowEnd,
+         windowNumber
       ))
    {
       return "WINDOW CLOSED";
    }
+
+   if(!GuardianArmRequiredForWindow(windowNumber))
+      return "OFF (WINDOW " + IntegerToString(windowNumber) + ")";
 
    datetime sharedExpiry = 0;
 

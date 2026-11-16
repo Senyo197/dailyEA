@@ -66,6 +66,15 @@ datetime GuardianGMTToServer(
       GuardianServerGMTOffsetSeconds();
 }
 
+datetime GuardianServerToGMT(
+   datetime serverTime
+)
+{
+   return
+      serverTime -
+      GuardianServerGMTOffsetSeconds();
+}
+
 //==================================================
 // GET START OF CURRENT GMT+0 DAY
 //==================================================

@@ -2,6 +2,12 @@
 #define __MANUAL_TRADING_GUARDIAN_TOGGLES__
 
 //==================================================
+// PANEL DISPLAY
+//==================================================
+
+input bool ShowLossAmountsAndRealizedProfitOnPanel = true;
+
+//==================================================
 // TRADING SCHEDULE
 //==================================================
 
@@ -20,6 +26,11 @@ input bool EnableWindow3TradeSplitLimit = true;
 //==================================================
 
 input bool EnableArmTradeConfirmation = true;
+input bool RequireArmTradeWindow1 = true;
+input bool RequireArmTradeWindow2 = false;
+input bool RequireArmTradeWindow3 = false;
+input bool RequireArmTradeWindow4 = false;
+input bool RequireArmTradeWindow5 = true;
 
 //==================================================
 // CALENDAR RULES

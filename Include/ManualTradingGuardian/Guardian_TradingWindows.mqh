@@ -42,6 +42,10 @@ input int Window5EndMinute   = 30;
 // entry window keep that window closed until this delay expires.
 input int  HighImpactNewsDelayMinutes = 10;
 
+// GMT+0 entries separated by semicolons:
+// 2026.11.16 17:00|SEC Chair speech;2026.11.17 13:30|Other release
+input string ManualHighImpactNewsGMT = "";
+
 // MT5 publishes US bank holidays under their individual holiday names.
 input string USBankHolidayNameMarkers =
    "BANK HOLIDAY,NEW YEAR,MARTIN LUTHER KING,WASHINGTON'S BIRTHDAY,"
@@ -62,7 +66,18 @@ const int GuardianNewsCacheRefreshSeconds = 300;
 datetime GuardianNewsCacheDay = 0;
 datetime GuardianNewsCacheUpdatedAt = 0;
 bool GuardianNewsCacheLoaded = false;
+bool GuardianNewsCacheRefreshFailed = false;
 MqlCalendarValue GuardianHighImpactNews[];
+
+struct GuardianManualHighImpactEvent
+{
+   datetime releaseGMT;
+   string name;
+};
+
+GuardianManualHighImpactEvent GuardianManualHighImpactNews[];
+bool GuardianManualHighImpactNewsLoaded = false;
+bool GuardianManualHighImpactNewsInputError = false;
 
 //==================================================
 // CHECK TIME INSIDE WINDOW
@@ -268,20 +283,8 @@ bool GuardianIsInsideWeeklyTradingPeriod(
    if(t.day_of_week == 0)
       return false;
 
-   // Monday
-   if(t.day_of_week == 1)
-      return true;
-
-   // Tuesday
-   if(t.day_of_week == 2)
-      return true;
-
-   // Wednesday
-   if(t.day_of_week == 3)
-      return true;
-
-   // Thursday
-   if(t.day_of_week == 4)
+   // Monday through Thursday
+   if(t.day_of_week >= 1 && t.day_of_week <= 4)
       return true;
 
    // Friday
@@ -453,7 +456,7 @@ bool GuardianIsCPIOrNFPEvent(
    );
 }
 
-bool GuardianIsFullDayBlackoutEvent(
+bool GuardianIsRateDecisionEvent(
    MqlCalendarEvent &event
 )
 {
@@ -461,11 +464,7 @@ bool GuardianIsFullDayBlackoutEvent(
 
    StringToUpper(eventName);
 
-   return (
-      StringFind(eventName, "INTEREST RATE DECISION") >= 0 ||
-      StringFind(eventName, "RATE DECISION") >= 0 ||
-      GuardianIsCPIOrNFPEvent(event)
-   );
+   return StringFind(eventName, "RATE DECISION") >= 0;
 }
 
 bool GuardianIsNonFridayWindow5(
@@ -517,58 +516,47 @@ bool GuardianFullDayNewsBlackoutActive(
    datetime dayStart =
       GuardianCalendarDayStart(when);
 
-   if(cacheLoaded && cachedDay == dayStart)
+   if(!cacheLoaded || cachedDay != dayStart)
    {
-      return (
-         unconditionalBlackoutActive ||
-         (cpiOrNFPBlackoutActive &&
-          !(EnableNonFridayCPIOrNFPWindow5Exemption &&
-            GuardianIsNonFridayWindow5(when)))
-      );
-   }
+      MqlCalendarValue values[];
 
-   MqlCalendarValue values[];
+      int valueCount =
+         GuardianLoadUSCalendarDayValues(
+            dayStart,
+            true,
+            "FULL-DAY NEWS BLACKOUT",
+            values
+         );
 
-   int valueCount =
-      GuardianLoadUSCalendarDayValues(
-         dayStart,
-         true,
-         "FULL-DAY NEWS BLACKOUT",
-         values
-      );
+      if(valueCount < 0)
+         return false;
 
-   if(valueCount < 0)
-      return false;
+      unconditionalBlackoutActive = false;
+      cpiOrNFPBlackoutActive = false;
 
-   unconditionalBlackoutActive = false;
-   cpiOrNFPBlackoutActive = false;
-
-   for(int i = 0;
-       i < valueCount;
-       i++)
-   {
-      MqlCalendarEvent event;
-
-      if(!CalendarEventById(values[i].event_id, event))
-         continue;
-
-      if(event.importance != CALENDAR_IMPORTANCE_HIGH)
-         continue;
-
-      if(GuardianIsCPIOrNFPEvent(event))
+      for(int i = 0; i < valueCount; i++)
       {
-         cpiOrNFPBlackoutActive = true;
-         continue;
+         MqlCalendarEvent event;
+
+         if(!CalendarEventById(values[i].event_id, event))
+            continue;
+
+         if(event.importance != CALENDAR_IMPORTANCE_HIGH)
+            continue;
+
+         if(GuardianIsCPIOrNFPEvent(event))
+         {
+            cpiOrNFPBlackoutActive = true;
+            continue;
+         }
+
+         if(GuardianIsRateDecisionEvent(event))
+            unconditionalBlackoutActive = true;
       }
 
-      if(!GuardianIsFullDayBlackoutEvent(event))
-         continue;
-
-      unconditionalBlackoutActive = true;
+      cachedDay = dayStart;
+      cacheLoaded = true;
    }
-
-   cachedDay = dayStart;
-   cacheLoaded = true;
 
    return (
       unconditionalBlackoutActive ||
@@ -841,12 +829,78 @@ int GuardianHighImpactNewsDelayForRelease(
    return HighImpactNewsDelayMinutes;
 }
 
+void GuardianLoadManualHighImpactNews()
+{
+   if(GuardianManualHighImpactNewsLoaded)
+      return;
+
+   GuardianManualHighImpactNewsLoaded = true;
+   GuardianManualHighImpactNewsInputError = false;
+   ArrayResize(GuardianManualHighImpactNews, 0);
+
+   if(StringLen(ManualHighImpactNewsGMT) == 0)
+      return;
+
+   string records[];
+   int recordCount = StringSplit(
+      ManualHighImpactNewsGMT,
+      StringGetCharacter(";", 0),
+      records
+   );
+
+   for(int i = 0; i < recordCount; i++)
+   {
+      string record = records[i];
+      StringTrimLeft(record);
+      StringTrimRight(record);
+
+      if(StringLen(record) == 0)
+         continue;
+
+      int separator = StringFind(record, "|");
+
+      if(separator < 0)
+      {
+         GuardianManualHighImpactNewsInputError = true;
+         Print("GUARDIAN: INVALID MANUAL NEWS ENTRY | ", record,
+               " | Expected YYYY.MM.DD HH:MM|Name (GMT+0)");
+         continue;
+      }
+
+      string timeText = StringSubstr(record, 0, separator);
+      string name = StringSubstr(record, separator + 1);
+      StringTrimLeft(timeText);
+      StringTrimRight(timeText);
+      StringTrimLeft(name);
+      StringTrimRight(name);
+
+      datetime releaseGMT = StringToTime(timeText);
+
+      if(StringLen(timeText) != 16 ||
+         TimeToString(releaseGMT, TIME_DATE | TIME_MINUTES) != timeText ||
+         StringLen(name) == 0)
+      {
+         GuardianManualHighImpactNewsInputError = true;
+         Print("GUARDIAN: INVALID MANUAL NEWS ENTRY | ", record,
+               " | Expected YYYY.MM.DD HH:MM|Name (GMT+0)");
+         continue;
+      }
+
+      int index = ArraySize(GuardianManualHighImpactNews);
+      ArrayResize(GuardianManualHighImpactNews, index + 1);
+      GuardianManualHighImpactNews[index].releaseGMT = releaseGMT;
+      GuardianManualHighImpactNews[index].name = name;
+   }
+}
+
 bool GuardianLoadHighImpactNews(
    datetime when
 )
 {
-   datetime dayStart =
-      GuardianCalendarDayStart(when);
+   datetime dayStart = GuardianCalendarDayStart(
+      GuardianServerToGMT(when)
+   );
+   datetime serverDayStart = GuardianGMTToServer(dayStart);
 
    bool cacheIsFresh =
       GuardianNewsCacheLoaded &&
@@ -863,12 +917,13 @@ bool GuardianLoadHighImpactNews(
    int valueCount =
       CalendarValueHistory(
          values,
-         dayStart,
-         dayStart + 86400
+          serverDayStart,
+          serverDayStart + 86400
       );
 
    if(valueCount < 0)
    {
+      GuardianNewsCacheRefreshFailed = true;
       int error = GetLastError();
 
       Print(
@@ -921,7 +976,30 @@ bool GuardianLoadHighImpactNews(
    GuardianNewsCacheDay = dayStart;
    GuardianNewsCacheUpdatedAt = when;
    GuardianNewsCacheLoaded = true;
+   GuardianNewsCacheRefreshFailed = false;
 
+   return true;
+}
+
+bool GuardianNewsReleaseWaitActive(
+   datetime when,
+   datetime releaseTime,
+   datetime &newsRelease
+)
+{
+   datetime whenGMT = GuardianServerToGMT(when);
+   datetime releaseGMT = GuardianServerToGMT(releaseTime);
+
+   if(!GuardianTimesShareEntryWindow(whenGMT, releaseGMT))
+      return false;
+
+   datetime allowedAt = releaseTime +
+      (GuardianHighImpactNewsDelayForRelease(releaseGMT) * 60);
+
+   if(when >= allowedAt)
+      return false;
+
+   newsRelease = releaseTime;
    return true;
 }
 
@@ -939,16 +1017,14 @@ bool GuardianHighImpactNewsDelayActive(
    if(HighImpactNewsDelayMinutes <= 0)
       return false;
 
-   if(!GuardianIsInsideEntryWindow(when, symbol))
+   if(!GuardianIsInsideEntryWindow(GuardianServerToGMT(when), symbol))
       return false;
 
-   if(!GuardianLoadHighImpactNews(when))
-      return false;
+   GuardianLoadManualHighImpactNews();
+   bool calendarAvailable = GuardianLoadHighImpactNews(when);
 
-   int total =
-      ArraySize(
-         GuardianHighImpactNews
-      );
+   int total = calendarAvailable ?
+      ArraySize(GuardianHighImpactNews) : 0;
 
    for(int i = 0;
        i < total;
@@ -957,23 +1033,20 @@ bool GuardianHighImpactNewsDelayActive(
       datetime releaseTime =
          GuardianHighImpactNews[i].time;
 
-      if(!GuardianTimesShareEntryWindow(when, releaseTime))
-         continue;
-
-      int delayMinutes =
-         GuardianHighImpactNewsDelayForRelease(
-            releaseTime
-         );
-
-      datetime allowedAt =
-         releaseTime +
-         (delayMinutes * 60);
-
-      if(when < allowedAt)
-      {
-         newsRelease = releaseTime;
+      if(GuardianNewsReleaseWaitActive(when, releaseTime, newsRelease))
          return true;
-      }
+   }
+
+   int manualTotal = ArraySize(GuardianManualHighImpactNews);
+
+   for(int i = 0; i < manualTotal; i++)
+   {
+      datetime releaseTime = GuardianGMTToServer(
+         GuardianManualHighImpactNews[i].releaseGMT
+      );
+
+      if(GuardianNewsReleaseWaitActive(when, releaseTime, newsRelease))
+         return true;
    }
 
    return false;

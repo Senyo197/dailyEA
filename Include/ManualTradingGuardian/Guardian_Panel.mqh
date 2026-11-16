@@ -4,6 +4,7 @@
 #include <Trade/Trade.mqh>
 
 #include "Guardian_TradingWindows.mqh"
+#include "Guardian_NewsPanel.mqh"
 #include "Guardian_History.mqh"
 #include "Guardian_TradeArm.mqh"
 #include "Guardian_Statistics.mqh"
@@ -162,6 +163,32 @@ void GuardianUpdatePanel(
          2
       );
 
+   string dailyMoneyLines = "";
+   string weeklyMoneyLines = "";
+
+   if(ShowLossAmountsAndRealizedProfitOnPanel)
+   {
+      dailyMoneyLines =
+         "Realized Profit:       " + dailyProfitText + "\n";
+
+      weeklyMoneyLines =
+         "Realized Profit:       " + weeklyProfitText + "\n" +
+         "Weekly Loss Amount:    " +
+         DoubleToString(MathMax(0.0, -weeklyProfit), 2) +
+         " / " +
+         DoubleToString(MaxWeeklyLossAmount, 2) +
+         " " + AccountInfoString(ACCOUNT_CURRENCY) +
+         " [" +
+         (EnableWeeklyLossAmountLimit ? weeklyAmountStatus : "OFF") +
+         "]\n" +
+         "Max SL per Trade:     " +
+         DoubleToString(MaxStopLossAmount, 2) +
+         " " + AccountInfoString(ACCOUNT_CURRENCY) +
+         " [" +
+         (EnableMaxStopLossAmount ? "ON" : "OFF") +
+         "]\n";
+   }
+
    //==================================================
    // PANEL
    //==================================================
@@ -169,13 +196,14 @@ void GuardianUpdatePanel(
    GuardianUpdateArmTradeControls();
 
    string text =
-      "MANUAL TRADING GUARDIAN v4.10\n"
+      "MANUAL TRADING GUARDIAN v4.17\n"
       "================================\n"
 
       "GMT+0 TIME:            " +
       currentGMTText +
-      "\n"
+      "\n" +
 
+      GuardianTodayWindowNewsText() +
       "--------------------------------\n"
 
       "DAILY\n"
@@ -213,11 +241,8 @@ void GuardianUpdatePanel(
       ) +
       " [" +
       dailyStatus +
-      "]\n"
-
-      "Realized Profit:       " +
-      dailyProfitText +
-      "\n"
+      "]\n" +
+      dailyMoneyLines +
 
       "--------------------------------\n"
 
@@ -256,27 +281,8 @@ void GuardianUpdatePanel(
       ) +
       " [" +
       weeklyStatus +
-      "]\n"
-
-      "Realized Profit:       " +
-      weeklyProfitText +
-      "\n"
-
-      "Weekly Loss Amount:    " +
-      DoubleToString(MathMax(0.0, -weeklyProfit), 2) +
-      " / " +
-      DoubleToString(MaxWeeklyLossAmount, 2) +
-      " " + AccountInfoString(ACCOUNT_CURRENCY) +
-      " [" +
-      (EnableWeeklyLossAmountLimit ? weeklyAmountStatus : "OFF") +
-      "]\n"
-
-      "Max SL per Trade:     " +
-      DoubleToString(MaxStopLossAmount, 2) +
-      " " + AccountInfoString(ACCOUNT_CURRENCY) +
-      " [" +
-      (EnableMaxStopLossAmount ? "ON" : "OFF") +
-      "]\n"
+      "]\n" +
+      weeklyMoneyLines +
 
       "--------------------------------\n"
 
